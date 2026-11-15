@@ -126,6 +126,18 @@ def cached_public_graph(owner: str, repo: str) -> dict | None:
     return None
 
 
+def invalidate_shared_graph(owner: str, repo: str) -> None:
+    """Remove recently public snapshots after the source archive returns 404."""
+    key = (owner + '/' + repo).lower()
+    _GRAPH_CACHE.pop(key, None)
+    try:
+        with _database() as db:
+            db.execute('DELETE FROM public_city_cache WHERE repo_key=?', (key,))
+    except sqlite3.Error:
+        # The request stays denied even if temporary SQLite is unavailable.
+        pass
+
+
 def _cache_public_graph(owner: str, repo: str, graph: dict) -> None:
     """Only verified public GitHub imports enter the shared city cache."""
     key = (owner + '/' + repo).lower()
@@ -341,6 +353,8 @@ async def get_repository_graph(raw: str, client: httpx.AsyncClient | None = None
         graph = await get_public_archive_graph(owner, repo, client=client)
         if client is None:
             _cache_public_graph(owner, repo, graph)
+            from .public_visibility import mark_fresh_public
+            mark_fresh_public(owner, repo)
             from .public_snapshot_pg import write_public_graph
             await write_public_graph(owner, repo, graph)
         return graph
@@ -394,6 +408,8 @@ async def get_repository_graph(raw: str, client: httpx.AsyncClient | None = None
             )
         if own_client:
             _cache_public_graph(owner, repo, graph)
+            from .public_visibility import mark_fresh_public
+            mark_fresh_public(owner, repo)
             from .public_snapshot_pg import write_public_graph
             await write_public_graph(owner, repo, graph)
         return graph
