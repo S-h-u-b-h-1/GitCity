@@ -52,6 +52,7 @@ def run(origin: str, *, import_repo: str | None = None, allow_local: bool = Fals
     with httpx.Client(base_url=origin, transport=transport, timeout=30, follow_redirects=False) as client:
         health=client.get('/api/health')
         check(health.status_code==200 and health.json().get('ok') is True, 'Health endpoint')
+        check(health.json().get('product')=='GitCity', 'Correct GitCity backend')
         check(health.json().get('version') == repoworld_app.version,
               f'Deployed backend matches source version {repoworld_app.version}')
         ready=client.get('/api/ready')

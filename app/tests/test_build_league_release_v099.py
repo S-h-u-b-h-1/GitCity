@@ -31,13 +31,13 @@ def hosted_transport(*,model_mode='ai',evidence=True,configured=True,
         requests.append((req.method,req.url.path))
         path=req.url.path
         if path=='/api/health':
-            return httpx.Response(200,json={'ok':True,'version':main.app.version})
+            return httpx.Response(200,json={'ok':True,'product':'GitCity','version':main.app.version})
         if path=='/api/ready':
-            return httpx.Response(200,json={'ready':True})
+            return httpx.Response(200,json={'ready':True,'version':main.app.version})
         if path=='/api/ready.svg':
             return httpx.Response(200,text='<svg/>',headers={'content-type':'image/svg+xml','cache-control':'no-store'})
         if path=='/':
-            return httpx.Response(200,text='RepoWorld',headers={'x-frame-options':'DENY','cache-control':'no-cache'})
+            return httpx.Response(200,text='<!doctype html><title>GitCity — city of code</title>',headers={'x-frame-options':'DENY','cache-control':'no-cache'})
         if path=='/static/browser-radar.js':
             return httpx.Response(200,text='window.RepoWorldBrowserIssueRadar=true;')
         if path=='/api/session':
@@ -107,3 +107,14 @@ def test_guest_quota_429_is_never_ignored_by_provider_fallback_flag():
         run('http://127.0.0.1:8004',import_repo='pallets/flask',allow_local=True,
             transport=transport,verify_live_ai=True,allow_browser_issues_fallback=True)
     assert not any(path.endswith('/assistant') for _,path in calls)
+
+
+def test_hosted_smoke_rejects_unverified_expected_backend_revision():
+    transport,_=hosted_transport()
+    with pytest.raises(RuntimeError,match='Backend matches expected commit'):
+        run('http://127.0.0.1:8004',allow_local=True,transport=transport,
+            expected_commit='a'*40)
+    transport,_=hosted_transport()
+    with pytest.raises(ValueError,match='Expected backend commit'):
+        run('http://127.0.0.1:8004',allow_local=True,transport=transport,
+            expected_commit='malformed')
