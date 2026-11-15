@@ -32,7 +32,7 @@ class FakeElement{
   focus(){}
   closest(){return null;}
 }
-function makeApp({authenticated=true,active=true,assistantResult=null,multipleIssues=false,importFailure=null,issueFailure=null,issueFailureMessage=null,browserIssues=null,browserIssueError=null,sourceLeadResult=null,sourceLeadError=null,deepLink='',storedLastRepo=null,storedOfflineCity=null,storageThrows=false,deferSession=false}={}){
+function makeApp({authenticated=true,active=true,assistantResult=null,multipleIssues=false,importFailure=null,issueFailure=null,issueFailureMessage=null,browserIssues=null,browserIssueError=null,sourceLeadResult=null,sourceLeadError=null,deepLink='',routePath='/',storedLastRepo=null,storedOfflineCity=null,storageThrows=false,deferSession=false}={}){
   let releaseSession;
   const sessionGate=deferSession?new Promise(resolve=>{releaseSession=resolve;}):null;
   const elements=new Map();
@@ -119,12 +119,18 @@ function makeApp({authenticated=true,active=true,assistantResult=null,multipleIs
     setItem(key,value){if(storageThrows)throw Error('Storage blocked');store.set(key,String(value));},
     removeItem(key){if(storageThrows)throw Error('Storage blocked');store.delete(key);}
   };
-  const location={origin:'http://127.0.0.1:8004',pathname:'/',search:deepLink,assign(){}};
+  const location={origin:'http://127.0.0.1:8004',pathname:routePath,search:deepLink,assign(){}};
+  const historyUpdates=[];
+  const history={replaceState(_state,_title,path){
+    historyUpdates.push(path);
+    const target=new URL(path,location.origin);
+    location.pathname=target.pathname;location.search=target.search;
+  }};
   const objectUrls=[];
   const window={RepoWorldRenderer:Renderer,REPOWORLD_COLORS:{frontend:'#88ccff'},REPOWORLD_DISTRICTS:{frontend:{name:'Frontend Boulevard'},api:{name:'API Heights'}},
     URL:{createObjectURL(){const uri='blob:repoworld-qa';objectUrls.push(uri);return uri;},revokeObjectURL(){}},
     confirm(){return true;},
-    setTimeout(){return 1;},clearTimeout(){},location,localStorage,navigator:{clipboard:{async writeText(value){copied.push(value);}}}};
+    setTimeout(){return 1;},clearTimeout(){},location,history,localStorage,navigator:{clipboard:{async writeText(value){copied.push(value);}}}};
   const sandbox={document,window,fetch:fetchStub,console,location,URLSearchParams,URL,Blob,
     clearTimeout(){},setTimeout(fn){fn();return 1;},encodeURIComponent,Response};
   vm.runInNewContext(browserIssueSource,sandbox);
@@ -133,7 +139,7 @@ function makeApp({authenticated=true,active=true,assistantResult=null,multipleIs
   vm.runInNewContext(source,sandbox);
   const flush=()=>new Promise(resolve=>setImmediate(resolve));
   async function boot(){document.onload();for(let i=0;i<4;i++)await flush();}
-  return {document,window,el,layers,compassTabs,calls,copied,store,objectUrls,boot,releaseSession:()=>releaseSession?.(),get renderer(){return renderer;}};
+  return {document,window,location,historyUpdates,el,layers,compassTabs,calls,copied,store,objectUrls,boot,releaseSession:()=>releaseSession?.(),get renderer(){return renderer;}};
 }
 
 test('a cold-starting backend keeps the branded loading screen until the session is ready',async()=>{
@@ -475,7 +481,7 @@ test('sharing a saved public city copies only owner/repo, never workspace creden
   assert.equal(ui.el('copyCityLink').hidden,false);
   await ui.el('copyCityLink').listeners.click();
   assert.equal(ui.copied.length,1);
-  assert.equal(ui.copied[0],'http://127.0.0.1:8004/?repo=testowner%2Fdemo-city');
+  assert.equal(ui.copied[0],'http://127.0.0.1:8004/testowner/demo-city');
   assert.ok(!ui.copied[0].includes('csrf-test'));
   assert.ok(!ui.copied[0].includes('id=demo'));
 });
@@ -503,6 +509,49 @@ test('invalid or external deep links never start a repository fetch or import mo
   assert.equal(ui.calls.filter(call=>call.url==='/api/my-repos').length,0);
 });
 
+
+test('repository paths prefill an import for a new visitor without network imports',async()=>{
+  const ui=makeApp({active:false,routePath:'/S-h-u-b-h-1/GitCity'});await ui.boot();
+  assert.equal(ui.el('addRepoDialog').open,true);
+  assert.equal(ui.el('importInput').value,'S-h-u-b-h-1/GitCity');
+  assert.equal(ui.location.pathname,'/S-h-u-b-h-1/GitCity');
+  assert.equal(ui.calls.filter(c=>c.url==='/api/my-repos'&&c.opts.method==='POST').length,0);
+});
+
+test('repository paths open existing public cities case-insensitively and canonicalize the URL',async()=>{
+  const ui=makeApp({active:true,routePath:'/TESTOWNER/demo-city/'});await ui.boot();
+  assert.equal(ui.el('activeRepoTitle').textContent,'Demo City');
+  assert.equal(ui.el('addRepoDialog').open,undefined);
+  assert.equal(ui.location.pathname,'/testowner/demo-city');
+  assert.equal(ui.calls.filter(c=>c.url==='/api/my-repos'&&c.opts.method==='POST').length,0);
+});
+
+test('legacy query URLs still open and migrate to canonical repository paths',async()=>{
+  const ui=makeApp({active:true,deepLink:'?repo=testowner%2Fdemo-city'});await ui.boot();
+  assert.equal(ui.location.pathname,'/testowner/demo-city');
+  assert.equal(ui.location.search,'');
+  assert.equal(ui.el('addRepoDialog').open,undefined);
+});
+
+test('invalid owner/repo paths and unsafe encodings never initiate imports',async()=>{
+  for(const routePath of ['/evil/%2Fsecret','/owner/repo/extra','/owner/..','/owner/.env','//owner/repo']){
+    const ui=makeApp({active:false,routePath});await ui.boot();
+    assert.equal(ui.el('addRepoDialog').open,undefined,routePath);
+    assert.equal(ui.calls.filter(c=>c.url==='/api/my-repos'&&c.opts.method==='POST').length,0,routePath);
+  }
+});
+
+test('the URL becomes /owner/repo after importing a public city',async()=>{
+  const ui=makeApp({active:false});await ui.boot();
+  ui.el('emptyAddRepo').listeners.click();
+  ui.el('importInput').value='testowner/demo-city';
+  await ui.el('importForm').listeners.submit({preventDefault(){}});
+  for(let i=0;i<5;i++)await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(ui.location.pathname,'/testowner/demo-city');
+  assert.ok(ui.historyUpdates.includes('/testowner/demo-city'));
+  await ui.el('copyCityLink').listeners.click();
+  assert.equal(ui.copied[0],'http://127.0.0.1:8004/testowner/demo-city');
+});
 test('Issue Radar browser fallback labels server-unverified hints after GitHub provider rate limit',async()=>{
   const raw=[
     {number:12,title:'Fix services/api/index.py login issue',state:'open',body:'services/api/index.py fails on invalid token',

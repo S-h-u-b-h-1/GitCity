@@ -2,6 +2,10 @@
 
 **Formerly RepoWorld.** The existing application, commit history, public city file format, and BharatCode submission provenance are preserved.
 
+**Shareable GitCity URLs:** [S-h-u-b-h-1/GitCity](https://gitcity-one.vercel.app/S-h-u-b-h-1/GitCity) · [facebook/react](https://gitcity-one.vercel.app/facebook/react). The interface accepts `/owner/repo`, opens an existing saved city or asks a new visitor to confirm import, and supports legacy `?repo=owner%2Frepo` links. It never auto-imports from a shared link.
+
+**Requested domain:** `gitcity.vercel.app` is currently assigned to a different Vercel team (Vercel `409 owned-on-other-team`). The production hostname remains `gitcity-one.vercel.app` until domain ownership is released or transferred.
+
 **Vercel frontend:** https://gitcity-one.vercel.app · **Source:** https://github.com/S-h-u-b-h-1/GitCity · **Existing API:** https://repoworld-3b9e.onrender.com
 
 GitCity turns public GitHub repositories into interactive 3D code cities, with static import links, Issue Radar, source-scoped developer guidance, and optional BharatCode inference. Vercel serves the interface as a static site and proxies `/api/*` to the current Render FastAPI service. This migration improves frontend delivery, but the Render Free backend can still sleep and lose temporary SQLite data. Exported public city JSON files remain readable because their versioned format is unchanged.
