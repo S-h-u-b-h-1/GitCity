@@ -538,3 +538,35 @@
 .startup-screen{flex-direction:column;gap:16px}
 .startup-screen .loading-brand{display:flex;align-items:center;justify-content:center;gap:16px}
 .startup-screen .loading-hint{max-width:370px;margin:0;padding:0 22px;text-align:center;font-size:12px;line-height:1.65;font-weight:400;letter-spacing:0;color:#9db5d0}
+
+
+/* GitCity PR impact mode: compact, source-qualified review, not a defect score. */
+#searchDialog .compass-tabs button{min-width:0}
+#searchDialog .pr-tab{min-width:0}
+#searchDialog .pr-tab h2{font-size:28px;line-height:1.2;letter-spacing:-.035em;margin:22px 0 9px;color:#f0f4fa}
+#searchDialog .pr-tab>label{display:block;margin:20px 0 8px;color:#d1dce8;font-size:12px;font-weight:600}
+#searchDialog .pr-query{display:flex;gap:9px;align-items:stretch}
+#searchDialog .pr-query input{min-width:0;flex:1;border:1px solid #536780;border-radius:9px;background:#141b27;color:#fff;padding:11px 12px;font-size:13px}
+#searchDialog .pr-query button{border:1px solid #d4e3f5;border-radius:9px;padding:11px 14px;background:#dae7f5;color:#17283c;font-size:12px;font-weight:650;white-space:nowrap}
+#searchDialog .pr-query button:disabled{opacity:.6;cursor:wait}
+#searchDialog .pr-status{font-size:12px;color:#a8bfd3;margin:14px 0;line-height:1.5}
+#searchDialog .pr-status.is-error{color:#ffbcbf}
+#searchDialog .pr-actions{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin:12px 0}
+#searchDialog .pr-actions a,#searchDialog .pr-actions button{background:none;border:0;color:#b9daf7;padding:4px 0;font-size:12px;text-decoration:underline;text-underline-offset:3px}
+#searchDialog .pr-results{display:grid;gap:7px;max-height:min(44vh,370px);overflow-y:auto;scrollbar-width:thin}
+#searchDialog .pr-file-row{width:100%;border:1px solid #495a6b;background:#1a2534;border-radius:9px;padding:11px 13px;text-align:left;color:#edf3fb;display:grid;gap:5px;font-size:12px;overflow-wrap:anywhere}
+#searchDialog button.pr-file-row{cursor:pointer}
+#searchDialog button.pr-file-row:hover,#searchDialog button.pr-file-row:focus-visible{background:#243951;border-color:#8caed4;outline-offset:2px}
+#searchDialog .pr-file-row strong{font-weight:610;color:#f2f6ff}
+#searchDialog .pr-file-row small{font-size:11px;color:#adc1d5;line-height:1.45}
+#searchDialog .pr-file-row[data-evidence="indexed-file"]{border-left:3px solid #9be2cf}
+#searchDialog .pr-file-row[data-evidence="previous-file"]{border-left:3px solid #b6b1ef}
+#searchDialog .pr-file-row[data-evidence="directory-hint"]{border-left:3px solid #ebc992}
+#searchDialog .pr-file-row[data-evidence="unmapped"]{opacity:.78}
+@media(max-width:620px){
+ #searchDialog .compass-tabs{gap:2px}
+ #searchDialog .compass-tabs button{font-size:11px;padding:11px 2px}
+ #searchDialog .pr-query{flex-direction:column}
+ #searchDialog .pr-query button{min-height:44px}
+ #searchDialog .pr-results{max-height:42dvh}
+}
