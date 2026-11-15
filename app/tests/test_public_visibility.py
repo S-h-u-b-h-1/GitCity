@@ -169,3 +169,42 @@ async def test_fresh_live_import_and_cache_hit_proof_then_private_transition(mon
             ).fetchone()[0]==0
     github._GRAPH_CACHE.clear()
     main._import_locks.clear()
+
+
+@pytest.mark.asyncio
+async def test_durable_public_snapshot_requires_visibility_proof_before_guest_save(monkeypatch,tmp_path):
+    """A PostgreSQL cache hit must not bypass the same public-source guard."""
+    from app import public_snapshot_pg
+    monkeypatch.setenv("APP_ENV","production")
+    monkeypatch.setenv("APP_BASE_URL","https://repo.example")
+    monkeypatch.setenv("REPOWORLD_DB_PATH",str(tmp_path/"durable-guard.sqlite3"))
+    github._GRAPH_CACHE.clear()
+    main._import_locks.clear()
+    cache_reads=[]
+    async def cloud(owner,repo):
+        cache_reads.append((owner,repo))
+        return public_graph(owner,repo)
+    async def forbidden_source(*_args,**_kwargs):
+        raise AssertionError("A denied cached map must not fetch or save a new source")
+    monkeypatch.setattr(public_snapshot_pg,"read_public_graph",cloud)
+    monkeypatch.setattr(main,"get_repository_graph",forbidden_source)
+    heads=[]
+    def provider(request):
+        heads.append(str(request.url))
+        return httpx.Response(404)
+    monkeypatch.setattr(proof,"_new_client",
+        lambda: httpx.AsyncClient(transport=httpx.MockTransport(provider)))
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=main.app),
+        base_url="https://repo.example") as visitor:
+        csrf=(await visitor.get("/api/session")).json()["csrf"]
+        response=await visitor.post("/api/my-repos",
+            json={"url":"public/demo"},headers={"X-RepoWorld-CSRF":csrf})
+        assert response.status_code==404,response.text
+        assert "no longer publicly accessible" in response.text
+        session=(await visitor.get("/api/session")).json()
+        assert session["repositories"]==[]
+    assert cache_reads==[("public","demo")]
+    assert heads==["https://codeload.github.com/public/demo/zip/HEAD"]
+    github._GRAPH_CACHE.clear()
+    main._import_locks.clear()
