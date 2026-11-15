@@ -52,10 +52,20 @@ async def _connect(dsn: str):
     return await asyncpg.connect(dsn=dsn, ssl="require", timeout=4, command_timeout=4)
 
 
+_ALLOWED_GRAPH_FIELDS = frozenset({
+    'name', 'owner', 'description', 'url', 'branch', 'stars', 'language',
+    'source', 'nodes', 'edges', 'stats', 'warnings',
+})
+
+
 def _valid_graph(graph: object, key: str) -> bool:
-    # Exact canonical public GitHub source check is shared with SQLite.
+    # Refuse unexpected top-level fields, especially guest session metadata.
+    # A public source path may mention credentials but this graph never
+    # contains source contents or actual session credentials.
     from .github import _verified_public_graph
-    return _verified_public_graph(graph, key)
+    return (isinstance(graph, dict) and
+            set(graph).issubset(_ALLOWED_GRAPH_FIELDS) and
+            _verified_public_graph(graph, key))
 
 
 async def read_public_graph(owner: str, repo: str) -> dict | None:
