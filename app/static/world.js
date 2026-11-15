@@ -385,7 +385,7 @@
           // On compact screens the inspector can cover the second click before
           // the canvas sees dblclick. Delay only selections that open a panel,
           // and cancel them if a double-click requests the city overview.
-          if(this.width<650&&(plaque||issue||hit)){
+          if(this.width<650&&((issue&&(!plaque||onIssueBadge))||(!plaque&&hit))){
             if(this.pendingCompactSelection!==null)clearTimeout(this.pendingCompactSelection);
             this.pendingCompactSelection=setTimeout(()=>{
               this.pendingCompactSelection=null;select();
