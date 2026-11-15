@@ -7,7 +7,7 @@
     chosen:null,layer:'structure',busy:false,offline:false,toast:null,impact:null,searchTimer:null,searchRevision:0,lastFindResults:[],
     radar:null,radarError:null,radarRevision:0,compassTab:'ask',chatHistory:[],chatBusy:false,assistantNode:null,assistantIssue:null,
     issueOpenNode:null,issueSelectedNumber:null,issueNotesResult:null,issueInsightCache:new Map(),issueInsightRevision:0,
-    prPreview:null,prRevision:0};
+    prPreview:null,prRevision:0,prReviewPlan:null};
   const esc=(s)=>String(s??'');
   const getNode=(id)=>state.graph?.nodes?.find(n=>n.id===id);
   const names={frontend:'Frontend Boulevard',api:'API Heights',service:'Service Quarter',database:'Data Harbor',
@@ -553,8 +553,11 @@
     finally{button.disabled=false;}
   }
   function resetPullPreview(){
-    state.prPreview=null;state.prRevision++;
+    state.prPreview=null;state.prRevision++;state.prReviewPlan=null;
     state.renderer?.setPullChangedNodes?.([]);
+    state.renderer?.setPullReviewPlan?.(null);
+    $('prReview').hidden=true;$('prReviewSections').replaceChildren();
+    $('prCopyReview').disabled=false;
     $('prResults').replaceChildren();
     $('prLoad').disabled=false;
     $('prClear').hidden=true;
@@ -565,10 +568,95 @@
     setText('prStatus','Enter a pull request number or an exact GitHub URL for this repository.');
     setText('prScope','GitHub file paths only; imported city mappings can be incomplete. No runtime impact or defect is verified.');
   }
+  function renderPRReviewSection(parent,title,items,kind,emptyText){
+    const section=document.createElement('section');section.className='pr-review-section';
+    const heading=document.createElement('h4');heading.textContent=title+' · '+items.length;
+    section.append(heading);
+    if(!items.length){
+      const empty=document.createElement('p');empty.className='pr-review-empty';
+      empty.textContent=emptyText;section.append(empty);
+    }
+    for(const item of items.slice(0,8)){
+      const button=document.createElement('button');button.type='button';
+      button.className='pr-review-target';button.dataset.reviewKind=kind;
+      const strong=document.createElement('strong');
+      strong.textContent=item.name||item.path;
+      const small=document.createElement('small');
+      if(kind==='changed'){
+        small.textContent=(item.hasIndexed?'Exact indexed file':item.hasPrevious?
+          'Exact prior filename':'Directory hint only')+' · '+item.path;
+      }else if(kind==='tests'){
+        small.textContent=(item.evidence==='changed-test-module'?'Changed test module':
+          'Test connected via sampled import')+' · '+item.path;
+      }else{
+        small.textContent=(item.chain||[]).join(' → ');
+      }
+      button.append(strong,small);
+      button.addEventListener('click',()=>chooseSearchResult(item.nodeId));
+      section.append(button);
+    }
+    if(items.length>8){
+      const more=document.createElement('p');more.className='pr-review-empty';
+      more.textContent='+'+(items.length-8)+' additional indexed modules. Copy the review checklist for more.';
+      section.append(more);
+    }
+    parent.append(section);
+  }
+  function renderPRReview(result){
+    const utility=window.GitCityPRReview;
+    if(!utility?.build){
+      state.prReviewPlan=null;
+      $('prReview').hidden=true;
+      return;
+    }
+    let plan;
+    try{plan=utility.build(state.graph,result);}
+    catch{
+      state.prReviewPlan=null;
+      state.renderer?.setPullReviewPlan?.(null);
+      $('prReview').hidden=true;
+      return;
+    }
+    state.prReviewPlan=plan;
+    state.renderer?.setPullReviewPlan?.(plan);
+    $('prReview').hidden=false;
+    setText('prReviewOverview',
+      plan.changedModules.length+' changed buildings · '+
+      plan.directImporters.length+' direct importer'+(plan.directImporters.length===1?'':'s')+' · '+
+      plan.twoHopImporters.length+' two-hop importer'+(plan.twoHopImporters.length===1?'':'s')+' · '+
+      plan.testCandidates.length+' linked test location'+(plan.testCandidates.length===1?'':'s')+
+      (plan.partial?' · PARTIAL PREVIEW':''));
+    const list=$('prReviewSections');list.replaceChildren();
+    renderPRReviewSection(list,'Changed buildings',plan.changedModules,'changed',
+      'No changed file matched an imported building.');
+    renderPRReviewSection(list,'Possible direct importers',plan.directImporters,'direct',
+      'No direct importer relationship was observed in the sampled graph.');
+    renderPRReviewSection(list,'Possible two-hop importers',plan.twoHopImporters,'indirect',
+      'No two-hop importer relationship was observed.');
+    renderPRReviewSection(list,'Relevant test modules',plan.testCandidates,'tests',
+      'No test module was linked through sampled imports; inspect tests manually.');
+  }
+  async function copyPRReview(){
+    if(!state.prReviewPlan||!window.GitCityPRReview?.formatChecklist){
+      toast('Inspect a pull request before copying review notes.',true);return;
+    }
+    let content;
+    try{content=window.GitCityPRReview.formatChecklist(state.prReviewPlan);}
+    catch{toast('Could not prepare a public PR review checklist.',true);return;}
+    try{
+      if(window.navigator?.clipboard?.writeText)
+        await window.navigator.clipboard.writeText(content);
+      else if(typeof window.prompt==='function')
+        window.prompt('Copy GitCity PR review checklist:',content);
+      else throw Error('Clipboard unavailable');
+      toast('Evidence-qualified PR review checklist copied. Run relevant tests before merging.');
+    }catch{toast('Clipboard unavailable. Open the PR on GitHub to review its files.',true);}
+  }
   function renderPullPreview(result){
     const container=$('prResults');container.replaceChildren();
     const changeIds=[...new Set(result.files.filter(row=>row.mapped).map(row=>row.mapped.nodeId))];
     state.renderer?.setPullChangedNodes?.(changeIds);
+    renderPRReview(result);
     const repo=result.repository;
     $('prOpenGithub').href='https://github.com/'+repo+'/pull/'+result.number;
     $('prOpenGithub').hidden=false;
@@ -1331,6 +1419,7 @@
     $('prImpactShortcut').addEventListener('click',()=>openFind('','pr'));
     $('prLoad').addEventListener('click',()=>loadPullImpact($('prInput').value));
     $('prMore').addEventListener('click',loadMorePullImpact);
+    $('prCopyReview').addEventListener('click',copyPRReview);
     $('prClear').addEventListener('click',clearPullPreview);
     $('prInput').addEventListener('keydown',event=>{
       if(event.key==='Enter'){event.preventDefault();loadPullImpact($('prInput').value);}

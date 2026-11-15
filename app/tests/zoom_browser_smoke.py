@@ -20,7 +20,8 @@ async def exercise(width, height):
         html = (ROOT/'app/static/index.html').read_text()
         html = html.replace('<link rel="stylesheet" href="/static/styles.css">', '')
         html = html.replace('<script defer src="/static/world.js"></script>', '').replace('<script defer src="/static/app.js"></script>', '')
-        html = html.replace('<script defer src="/static/pr-impact.js"></script>', '')
+        html = html.replace('<script defer src="/static/pr-impact.js"></script>', '').replace(
+                '<script defer src="/static/pr-review.js"></script>', '')
         await page.set_content(html, wait_until='domcontentloaded')
         css = (ROOT/'app/static/styles.css').read_text()
         art = base64.b64encode((ROOT/'app/static/city-concept.png').read_bytes()).decode()

@@ -21,7 +21,10 @@ async def main():
     graph=build_demo()
     graph.update(name="demo-city",owner="testowner",source="github",
                  url="https://github.com/testowner/demo-city",branch="main")
-    path=graph["nodes"][0]["files"][0]
+    # Choose a module actually imported by another module to verify the
+    # evidence-qualified direct-importer result, not just the changed tower.
+    target=graph['edges'][0]['target']
+    path=next(node for node in graph['nodes'] if node['id']==target)['files'][0]
     async with async_playwright() as p:
         browser=await launch_test_browser(p)
         for width,height in [(1440,900),(390,844)]:
@@ -32,6 +35,7 @@ async def main():
                      "activeRepo":"demo","aiConfigured":False}
             errors=await verify(page,session,graph,"/testowner/demo-city")
             await page.add_script_tag(content=(ROOT/"app/static/pr-impact.js").read_text())
+            await page.add_script_tag(content=(ROOT/"app/static/pr-review.js").read_text())
             await page.evaluate("""({path})=>{
                 window.__PR_HTTP_CALLS__=[];
                 const existing=window.fetch;
@@ -54,6 +58,10 @@ async def main():
             await page.locator("#prResults .pr-file-row").first.wait_for(state="visible",timeout=9000)
             assert await page.locator("#prResults .pr-file-row").count()==2
             assert "1 UNMAPPED" in (await page.locator("#prStatus").inner_text())
+            assert await page.locator("#prReview").is_visible()
+            assert "changed buildings" in await page.locator("#prReviewOverview").inner_text()
+            assert "1 direct importer" in await page.locator("#prReviewOverview").inner_text()
+            assert await page.locator("#prCopyReview").is_visible()
             assert await page.locator("#prOpenGithub").get_attribute("href")==(
                 "https://github.com/testowner/demo-city/pull/31")
             assert page.url=="https://gitcity.test/testowner/demo-city/pull/31",page.url
@@ -92,6 +100,9 @@ async def main():
             assert await page.evaluate("window.__MORE_PAGE_CALLS__")==[1,2]
             assert await page.locator("#prMore").is_hidden()
             assert "1 FILE MATCH" in (await page.locator("#prStatus").inner_text())
+            assert await page.locator("#prReview").is_visible()
+            assert await page.locator("#prReviewSections .pr-review-section").count()==4
+            assert "1 direct importer" in await page.locator("#prReviewOverview").inner_text()
             await page.locator("#prResults button.pr-file-row").click()
             await page.locator("#inspector").wait_for(state="visible",timeout=9000)
             assert not await page.evaluate("document.documentElement.scrollWidth>innerWidth")

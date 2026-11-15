@@ -461,3 +461,28 @@ test('district focus shows only its own plaques and issue pins until Overview re
   renderer.render(3400);
   assert.ok(renderer.districtHitAreas.some(p=>p.kind!=='api'));
 });
+
+
+test('PR review renderer only highlights existing sampled importer links and resets on switch',()=>{
+  const {renderer}=world();renderer.setGraph(graph);
+  renderer.setPullReviewPlan({
+    changedModules:[{nodeId:'src/db'},{nodeId:'missing'}],
+    directImporters:[{nodeId:'src/api'},{nodeId:'unknown'}],
+    twoHopImporters:[{nodeId:'src/web'},{nodeId:'src/db'}],
+    linkedEdges:[
+      {source:'src/api',target:'src/db'},
+      {source:'src/web',target:'src/api'},
+      {source:'outside',target:'src/db'}
+    ],
+  });
+  assert.deepEqual(Array.from(renderer.prChangedNodes),['src/db']);
+  assert.deepEqual(Array.from(renderer.prDirectNodes),['src/api']);
+  assert.deepEqual(Array.from(renderer.prIndirectNodes),['src/web']);
+  assert.equal(renderer.prReviewEdges.size,2);
+  renderer.setMode('structure');renderer.render(1000);
+  renderer.setPullReviewPlan(null);
+  assert.equal(renderer.prDirectNodes.size,0);
+  assert.equal(renderer.prReviewEdges.size,0);
+  renderer.setGraph(graph);
+  assert.equal(renderer.prIndirectNodes.size,0);
+});

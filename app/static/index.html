@@ -13,6 +13,7 @@
   <script defer src="/static/investigation-notes.js"></script>
   <script defer src="/static/offline-city.js"></script>
   <script defer src="/static/pr-impact.js"></script>
+  <script defer src="/static/pr-review.js"></script>
   <script defer src="/static/app.js"></script>
 </head>
 <body>
@@ -223,6 +224,21 @@
           <button type="button" id="prLoad">Inspect PR</button>
         </div>
         <p id="prStatus" class="pr-status" role="status" aria-live="polite">Enter a pull request in this repository. GitCity reads up to 100 files initially, with optional pages up to 300.</p>
+        <section id="prReview" class="pr-review" hidden aria-label="Evidence-qualified review map">
+          <div class="pr-review-header">
+            <div><span class="pr-review-kicker">REVIEW MAP / SAMPLED IMPORTS</span>
+              <h3>Where else should I look?</h3></div>
+            <button type="button" id="prCopyReview" class="pr-copy-review">Copy review checklist</button>
+          </div>
+          <p id="prReviewOverview" class="pr-review-overview"></p>
+          <div class="pr-review-key" aria-label="City highlight key">
+            <span><i class="pr-marker changed"></i> Changed</span>
+            <span><i class="pr-marker direct"></i> Direct importers</span>
+            <span><i class="pr-marker indirect"></i> Two-hop importers</span>
+          </div>
+          <div id="prReviewSections" class="pr-review-sections"></div>
+          <p class="pr-review-caveat">Only sampled static imports are traced. Suggested locations are not verified breakages. No tests have been executed by this review.</p>
+        </section>
         <div class="pr-actions">
           <a id="prOpenGithub" href="https://github.com" target="_blank" rel="noopener noreferrer" hidden>View pull request on GitHub ↗</a>
           <button type="button" id="prClear" hidden>Clear map highlights</button>
