@@ -21,7 +21,10 @@ async def main():
     graph=build_demo()
     graph.update(name="demo-city",owner="testowner",source="github",
                  url="https://github.com/testowner/demo-city",branch="main")
-    path=graph["nodes"][0]["files"][0]
+    # Choose a module actually imported by another module to verify the
+    # evidence-qualified direct-importer result, not just the changed tower.
+    target=graph['edges'][0]['target']
+    path=next(node for node in graph['nodes'] if node['id']==target)['files'][0]
     async with async_playwright() as p:
         browser=await launch_test_browser(p)
         for width,height in [(1440,900),(390,844)]:
@@ -57,6 +60,7 @@ async def main():
             assert "1 UNMAPPED" in (await page.locator("#prStatus").inner_text())
             assert await page.locator("#prReview").is_visible()
             assert "changed buildings" in await page.locator("#prReviewOverview").inner_text()
+            assert "1 direct importer" in await page.locator("#prReviewOverview").inner_text()
             assert await page.locator("#prCopyReview").is_visible()
             assert await page.locator("#prOpenGithub").get_attribute("href")==(
                 "https://github.com/testowner/demo-city/pull/31")
@@ -98,6 +102,7 @@ async def main():
             assert "1 FILE MATCH" in (await page.locator("#prStatus").inner_text())
             assert await page.locator("#prReview").is_visible()
             assert await page.locator("#prReviewSections .pr-review-section").count()==4
+            assert "1 direct importer" in await page.locator("#prReviewOverview").inner_text()
             await page.locator("#prResults button.pr-file-row").click()
             await page.locator("#inspector").wait_for(state="visible",timeout=9000)
             assert not await page.evaluate("document.documentElement.scrollWidth>innerWidth")
