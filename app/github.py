@@ -22,6 +22,7 @@ from .graph import (MAX_ANALYZED_SOURCES, MAX_SOURCE_BYTES, build_graph,
 GH_API = "https://api.github.com"
 _GRAPH_CACHE: dict[str, tuple[float, dict]] = {}
 GRAPH_TTL_SECONDS = 480
+GRAPH_CACHE_MAX_ENTRIES = 24
 OWNER_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$")
 REPO_RE = re.compile(r"^[A-Za-z0-9_.-]{1,100}$")
 # Github's unauthenticated API allowance is 60 calls / hour per origin IP.
@@ -30,6 +31,49 @@ DEFAULT_PUBLIC_SOURCE_LIMIT = 6
 DEFAULT_AUTHENTICATED_SOURCE_LIMIT = 16
 SOURCE_FETCH_CONCURRENCY = 3
 SOURCE_FETCH_BUDGET_SECONDS = 21
+
+
+def cached_public_graph(owner: str, repo: str) -> dict | None:
+    """An immutable copy of a recently fetched *public* repository snapshot.
+
+    Only server-fetched graphs may enter this cache; do not accept browser
+    snapshots as cache entries. Results may lag GitHub by up to eight minutes.
+    """
+    key = (owner + '/' + repo).lower()
+    entry = _GRAPH_CACHE.get(key)
+    if not entry:
+        return None
+    age = time.monotonic() - entry[0]
+    if age < 0 or age >= GRAPH_TTL_SECONDS:
+        _GRAPH_CACHE.pop(key, None)
+        return None
+    graph = entry[1]
+    if graph.get('source') != 'github':
+        return None
+    try:
+        actual_owner, actual_repo = parse_repository(graph['url'])
+    except (RepoError, KeyError, TypeError):
+        return None
+    if (actual_owner + '/' + actual_repo).lower() != key:
+        return None
+    return copy.deepcopy(graph)
+
+
+def _cache_public_graph(owner: str, repo: str, graph: dict) -> None:
+    """Bound RAM use and keep cached public graphs isolated from callers."""
+    if not isinstance(graph, dict) or graph.get('source') != 'github':
+        return
+    try:
+        canonical = parse_repository(graph['url'])
+    except (RepoError, KeyError, TypeError):
+        return
+    key = (owner + '/' + repo).lower()
+    if (canonical[0] + '/' + canonical[1]).lower() != key:
+        return
+    if key not in _GRAPH_CACHE and len(_GRAPH_CACHE) >= GRAPH_CACHE_MAX_ENTRIES:
+        oldest = min(_GRAPH_CACHE, key=lambda k: _GRAPH_CACHE[k][0])
+        _GRAPH_CACHE.pop(oldest, None)
+    _GRAPH_CACHE[key] = (time.monotonic(), copy.deepcopy(graph))
 
 
 class RepoError(Exception):
@@ -220,14 +264,19 @@ async def get_repository_graph(raw: str, client: httpx.AsyncClient | None = None
                                *, refresh: bool = False) -> dict:
     owner, repo = parse_repository(raw)
     cache_key = (owner + "/" + repo).lower()
-    cached = _GRAPH_CACHE.get(cache_key) if client is None and not refresh else None
+    cached = cached_public_graph(owner, repo) if client is None and not refresh else None
     token = os.environ.get("GITHUB_TOKEN", "").strip()
     if not token and os.getenv("REPOWORLD_EPHEMERAL_DEMO") == "1":
         # Explicit free public preview: use the bounded source ZIP endpoint,
         # not the shared-IP GitHub REST allowance. Token-backed imports keep
         # the normal metadata/visibility checks and expanded source sampling.
         from .archive_import import get_public_archive_graph
-        return await get_public_archive_graph(owner, repo, client=client)
+        if cached is not None:
+            return cached
+        graph = await get_public_archive_graph(owner, repo, client=client)
+        if client is None:
+            _cache_public_graph(owner, repo, graph)
+        return graph
     headers = {"Accept": "application/vnd.github+json", "User-Agent": "RepoWorld/0.9.7",
                "X-GitHub-Api-Version": "2022-11-28"}
     if token:
@@ -242,8 +291,8 @@ async def get_repository_graph(raw: str, client: httpx.AsyncClient | None = None
         meta = await _json(client, base, headers)
         if meta.get("private") is not False:
             raise RepoError("Private or unverified repositories are not supported. Only public code is analyzed.", 403)
-        if cached and time.monotonic() - cached[0] < GRAPH_TTL_SECONDS:
-            return copy.deepcopy(cached[1])
+        if cached is not None:
+            return cached
         branch = str(meta.get("default_branch") or "main")
         if len(branch) > 150 or any(c in branch for c in "?#\\\x00"):
             raise RepoError("Repository branch could not be safely parsed.", 502)
@@ -277,9 +326,7 @@ async def get_repository_graph(raw: str, client: httpx.AsyncClient | None = None
                 "Issue investigations can retrieve additional relevant files later."
             )
         if own_client:
-            if len(_GRAPH_CACHE) >= 60:
-                _GRAPH_CACHE.clear()
-            _GRAPH_CACHE[cache_key] = (time.monotonic(), copy.deepcopy(graph))
+            _cache_public_graph(owner, repo, graph)
         return graph
     finally:
         if own_client:

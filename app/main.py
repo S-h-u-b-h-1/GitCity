@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections import defaultdict, deque
+import asyncio
 from pathlib import Path
 import logging
 import os
@@ -18,7 +19,7 @@ from .issues import fetch_issue_radar
 from .auth import (choose_repo, delete_repo, ensure_guest_session, repo_summaries,
                    require_user, save_repo, session_user, stored_repo)
 from .demo import build_demo
-from .github import RepoError, get_repository_graph, parse_repository
+from .github import RepoError, cached_public_graph, get_repository_graph, parse_repository
 from .intelligence import find_modules, impact_trace
 from .quotas import reserve_ai, reserve_import, reserve_refresh, reserve_source_probe
 from .request_limits import RequestBodyLimit
@@ -29,6 +30,24 @@ app.add_middleware(RequestBodyLimit)
 logger = logging.getLogger("repoworld.import")
 app.mount("/static", StaticFiles(directory=str(APP_ROOT / "static")), name="static")
 _request_times: dict[str, deque] = defaultdict(deque)
+# A single worker shares in-flight imports across simultaneous visitors.
+# Free Render still uses a bounded, short-lived in-process public-city cache.
+_import_locks: dict[str, asyncio.Lock] = {}
+
+
+def _import_lock(key: str) -> asyncio.Lock:
+    lock = _import_locks.get(key)
+    if lock is not None:
+        return lock
+    if len(_import_locks) >= 128:
+        for old_key, old_lock in list(_import_locks.items()):
+            if not old_lock.locked():
+                _import_locks.pop(old_key, None)
+            if len(_import_locks) < 64:
+                break
+    lock = asyncio.Lock()
+    _import_locks[key] = lock
+    return lock
 
 
 class GraphRequest(BaseModel):
@@ -191,18 +210,35 @@ async def import_my_repo(request: Request, payload: ImportRequest):
     _profile, uid, _csrf = require_user(request, mutation=True)
     # Parse before debiting a request quota. Never log user-supplied arbitrary URLs.
     owner, repo = parse_repository(payload.url)
-    _limit(request, f"import:{uid}", count=10)
-    reserve_import(uid, request.client.host if request.client else "unknown")
     began = time.monotonic()
     try:
-        graph = (await get_repository_graph(payload.url, refresh=True)) if payload.refresh else await get_repository_graph(payload.url)
+        key = (owner + '/' + repo).lower()
+        # Reusing a confirmed, recent public graph costs no GitHub/codeload I/O.
+        # Never waive quotas for cache misses, forced refreshes or failed imports.
+        if payload.refresh:
+            _limit(request, f"import:{uid}", count=30)
+            reserve_import(uid, request.client.host if request.client else "unknown")
+            graph = await get_repository_graph(payload.url, refresh=True)
+            cached = False
+        else:
+            # One GitHub fetch per public repo even when two guests arrive
+            # concurrently. The cached result contains no private workspace.
+            async with _import_lock(key):
+                graph = cached_public_graph(owner, repo)
+                cached = graph is not None
+                if not cached:
+                    _limit(request, f"import:{uid}", count=30)
+                    reserve_import(uid, request.client.host if request.client else "unknown")
+                    graph = await get_repository_graph(payload.url)
         saved = save_repo(uid, graph)
+        if cached:
+            saved['cacheStatus'] = 'recent-public-snapshot'
     except RepoError as exc:
         logger.warning("Public repo import failed: %s/%s, status=%d, elapsed=%.1fs, reason=%s",
                        owner, repo, exc.status, time.monotonic()-began, exc.detail)
         raise
-    logger.info("Public repo imported: %s/%s, elapsed=%.1fs, sampled_files=%s",
-                owner, repo, time.monotonic()-began, graph.get("stats",{}).get("inspectedSources"))
+    logger.info("Public repo loaded: %s/%s, cache=%s, elapsed=%.1fs, sampled_files=%s",
+                owner, repo, cached, time.monotonic()-began, graph.get("stats",{}).get("inspectedSources"))
     return saved
 
 

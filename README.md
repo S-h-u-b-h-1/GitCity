@@ -6,6 +6,8 @@
 
 **Requested domain:** `gitcity.vercel.app` is currently assigned to a different Vercel team (Vercel `409 owned-on-other-team`). The production hostname remains `gitcity-one.vercel.app` until domain ownership is released or transferred.
 
+**Import budget mitigation (November 2026):** Direct `/owner/repo` loads reuse the recent public-only in-process graph cache (8-minute TTL, bounded entries) before charging a new GitHub import. When multiple visitors request the same repo simultaneously, they share the same fetch. Cache hits still create isolated, CSRF-protected anonymous workspaces. Fresh repositories, forced refreshes, and provider failures remain subject to the rate limits; Render Free's restarts still clear in-memory cache and temporary SQLite.
+
 **Vercel frontend:** https://gitcity-one.vercel.app · **Source:** https://github.com/S-h-u-b-h-1/GitCity · **Existing API:** https://repoworld-3b9e.onrender.com
 
 GitCity turns public GitHub repositories into interactive 3D code cities, with static import links, Issue Radar, source-scoped developer guidance, and optional BharatCode inference. Vercel serves the interface as a static site and proxies `/api/*` to the current Render FastAPI service. This migration improves frontend delivery, but the Render Free backend can still sleep and lose temporary SQLite data. Exported public city JSON files remain readable because their versioned format is unchanged.
