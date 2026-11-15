@@ -1,3 +1,24 @@
+# GitCity — release status (15 November 2026)
+
+- Public frontend: https://gitcity-one.vercel.app. Backend Render Free: https://repoworld-3b9e.onrender.com.
+- PR #30: repaired Python/Node release tests and CI configuration.
+- PR #31: tested compact mobile camera reset; five Playwright desktop/mobile suites passed in isolated QA. Vercel production still requires a fresh release.
+- PR #32: optional TLS PostgreSQL public-city cache; integration tests passed, but no Neon project has been provisioned or enabled.
+- PR #33: fail-closed visibility checks before shared cached maps are assigned to new anonymous browsers (90-second public proof; private/revoked maps denied). Backend rollout pending.
+- Pending Vercel deployment: one-time retry scheduled for 16 November 2026 at 16:30 IST. Static production was still serving a prior renderer when last checked.
+- Render deployment is manual; Free ephemeral sessions are lost on redeploy. Do not force a backend redeploy or provision paid Neon without a safe migration or explicit cost approval.
+- GitHub Actions remain disabled under the previously requested project-wide workflow policy. Independent QA evidence is not equivalent to hosted CI.
+- Current release work: unify health/readiness release versions and expose a sanitized backend Git SHA for deployment verification.
+
+## Next reliable targets
+
+1. Revalidate both public site and Render backend with exact deployed SHAs.
+2. Plan dedicated durable guest storage and cost ceiling; do not reuse other apps' databases.
+3. Keep public-source evidence qualified; grow change-impact / pull-request investigation after release gates.
+4. Rerun authenticated/real-GitHub, browser/mobile and quota tests after each deploy.
+
+---
+
 # RepoWorld — Current development and release gates (November 5, 2026)
 
 ## Shipped and tested in source

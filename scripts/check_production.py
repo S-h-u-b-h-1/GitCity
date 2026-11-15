@@ -38,7 +38,7 @@ def check_config(env: dict[str,str] | None=None) -> list[tuple[str,bool,str]]:
 
 def main() -> int:
     rows=check_config()
-    print('RepoWorld production readiness (values and secrets never displayed)')
+    print('GitCity production readiness (values and secrets never displayed)')
     for name,ready,tip in rows:
         print(('PASS' if ready else 'NEEDS SETUP')+'  '+name+((' — '+tip) if not ready else ''))
     if all(ready for _,ready,_ in rows):

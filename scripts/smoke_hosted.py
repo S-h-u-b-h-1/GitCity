@@ -1,4 +1,4 @@
-"""Safe, read-only launch smoke test against a deployed RepoWorld origin.
+"""Non-destructive GitCity launch smoke test against a deployed origin.
 
 By default this checks no GitHub or BharatCode endpoints that spend API quota.
 Explicit --import adds an end-to-end public import + Issue Radar check.
@@ -7,6 +7,7 @@ Never prints auth cookies, CSRF tokens or secret environment values.
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -34,7 +35,8 @@ def _origin(value: str, *, allow_local: bool = False) -> str:
 def run(origin: str, *, import_repo: str | None = None, allow_local: bool = False,
         transport: httpx.BaseTransport | None = None, require_ai: bool = False,
         verify_live_ai: bool = False, require_source_evidence: bool = False,
-        allow_browser_issues_fallback: bool = False) -> list[str]:
+        allow_browser_issues_fallback: bool = False,
+        expected_commit: str | None = None) -> list[str]:
     if (verify_live_ai or require_source_evidence) and not import_repo:
         raise ValueError('Live AI checks require --import-repo to identify a saved public city.')
     if require_source_evidence and not verify_live_ai:
@@ -50,15 +52,32 @@ def run(origin: str, *, import_repo: str | None = None, allow_local: bool = Fals
     with httpx.Client(base_url=origin, transport=transport, timeout=30, follow_redirects=False) as client:
         health=client.get('/api/health')
         check(health.status_code==200 and health.json().get('ok') is True, 'Health endpoint')
+        check(health.json().get('product')=='GitCity', 'Correct GitCity backend')
         check(health.json().get('version') == repoworld_app.version,
               f'Deployed backend matches source version {repoworld_app.version}')
         ready=client.get('/api/ready')
         check(ready.status_code==200 and ready.json().get('ready') is True, 'Deployment readiness')
+        check(ready.json().get('version')==health.json().get('version'),
+              'Health and readiness report the same backend version')
+        observed=health.json().get('revision')
+        if observed is not None:
+            check(isinstance(observed,str) and bool(re.fullmatch(r'[0-9a-f]{12}',observed)),
+                  'Backend revision is a validated public SHA prefix')
+            check(ready.json().get('revision')==observed,
+                  'Health and readiness report the same backend revision')
+        else:
+            check('revision' not in ready.json(),
+                  'Backend revision is consistently absent when unconfigured')
+        if expected_commit is not None:
+            if not re.fullmatch(r'[0-9a-fA-F]{12,40}',expected_commit):
+                raise ValueError('Expected backend commit must be 12-40 hex characters.')
+            check(observed==expected_commit[:12].lower(),
+                  f'Backend matches expected commit {expected_commit[:12].lower()}')
         image=client.get('/api/ready.svg')
         check(image.status_code==200 and 'image/svg+xml' in image.headers.get('content-type','')
               and image.headers.get('cache-control')=='no-store', 'Launcher readiness SVG')
         index=client.get('/')
-        check(index.status_code==200 and 'RepoWorld' in index.text, 'Website homepage')
+        check(index.status_code==200 and '<title>GitCity' in index.text, 'GitCity website homepage')
         browser_issues=client.get('/static/browser-radar.js')
         check(browser_issues.status_code==200 and 'RepoWorldBrowserIssueRadar' in browser_issues.text, 'Browser-direct Issue Radar available')
         check(index.headers.get('x-frame-options')=='DENY', 'Frame protection')
@@ -137,13 +156,15 @@ def run(origin: str, *, import_repo: str | None = None, allow_local: bool = Fals
 
 
 def main():
-    parser=argparse.ArgumentParser(description='RepoWorld hosted smoke check (does not reveal secrets)')
-    parser.add_argument('url',help='Public HTTPS origin such as https://repoworld.onrender.com')
+    parser=argparse.ArgumentParser(description='GitCity hosted smoke check (does not reveal secrets)')
+    parser.add_argument('url',help='Public HTTPS origin such as https://repoworld-3b9e.onrender.com')
     parser.add_argument('--import-repo',default=None,help='Optional public owner/repo (spends import budget)')
     parser.add_argument('--allow-local',action='store_true',help='Use HTTP loopback for development')
     parser.add_argument('--require-ai',action='store_true',help='Fail if BharatCode is not configured (no model call)')
     parser.add_argument('--verify-live-ai',action='store_true',help='Spend one explicitly requested model call after import')
     parser.add_argument('--require-source-evidence',action='store_true',help='Require a fetched source excerpt in the model answer')
+    parser.add_argument('--expected-commit',default=None,
+                        help='Expected Render backend SHA, not Vercel frontend SHA')
     parser.add_argument('--allow-browser-issues-fallback',action='store_true',
                         help='Continue past provider-specific GitHub issue 429; does NOT verify actual browser CORS')
     args=parser.parse_args()
@@ -151,7 +172,8 @@ def main():
         for note in run(args.url,import_repo=args.import_repo,allow_local=args.allow_local,
                         require_ai=args.require_ai,verify_live_ai=args.verify_live_ai,
                         require_source_evidence=args.require_source_evidence,
-                        allow_browser_issues_fallback=args.allow_browser_issues_fallback):
+                        allow_browser_issues_fallback=args.allow_browser_issues_fallback,
+                         expected_commit=args.expected_commit):
             print(note)
         return 0
     except (ValueError, RuntimeError, httpx.RequestError, KeyError, TypeError) as exc:
