@@ -33,6 +33,7 @@ jobs:
           node --check app/static/browser-radar.js
           node --check app/static/investigation-notes.js
           node --check app/static/offline-city.js
+          node --check app/static/city-vault.js
           node --check app/static/pr-impact.js
           node --check app/static/pr-review.js
       - name: Frontend interaction and renderer tests

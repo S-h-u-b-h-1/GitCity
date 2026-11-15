@@ -123,6 +123,6 @@
   function clear(storage){
     try{storage?.removeItem?.(KEY);return true;}catch{return false;}
   }
-  window.RepoWorldOfflineCity={save,read,clear,exportText,importText,restoreText,fileName,
+  window.RepoWorldOfflineCity={save,read,clear,exportText,importText,restoreText,fileName,sanitize:extract,
     maxFileChars:MAX_JSON_CHARS,maxFileBytes:5_000_000};
 })();

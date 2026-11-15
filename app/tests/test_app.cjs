@@ -8,6 +8,7 @@ const source=fs.readFileSync(path.join(__dirname,'../static/app.js'),'utf8');
 const browserIssueSource=fs.readFileSync(path.join(__dirname,'../static/browser-radar.js'),'utf8');
 const issueNotesSource=fs.readFileSync(path.join(__dirname,'../static/investigation-notes.js'),'utf8');
 const offlineCitySource=fs.readFileSync(path.join(__dirname,'../static/offline-city.js'),'utf8');
+const vaultSource=fs.readFileSync(path.join(__dirname,'../static/city-vault.js'),'utf8');
 const pullImpactSource=fs.readFileSync(path.join(__dirname,'../static/pr-impact.js'),'utf8');
 const pullReviewSource=fs.readFileSync(path.join(__dirname,'../static/pr-review.js'),'utf8');
 const GRAPH={name:'Demo City',owner:'testowner',branch:'main',source:'github',url:'https://github.com/testowner/demo-city',
@@ -34,7 +35,7 @@ class FakeElement{
   focus(){}
   closest(){return null;}
 }
-function makeApp({authenticated=true,active=true,assistantResult=null,multipleIssues=false,importFailure=null,issueFailure=null,issueFailureMessage=null,browserIssues=null,browserIssueError=null,sourceLeadResult=null,sourceLeadError=null,deepLink='',routePath='/',storedLastRepo=null,storedOfflineCity=null,storageThrows=false,deferSession=false,deferImport=false,prFiles=null,prFailure=null,prPages=null}={}){
+function makeApp({authenticated=true,active=true,assistantResult=null,multipleIssues=false,importFailure=null,issueFailure=null,issueFailureMessage=null,browserIssues=null,browserIssueError=null,sourceLeadResult=null,sourceLeadError=null,deepLink='',routePath='/',storedLastRepo=null,storedOfflineCity=null,storedVault=null,storedVaultEnabled=null,sessionFailure=false,storageThrows=false,deferSession=false,deferImport=false,prFiles=null,prFailure=null,prPages=null}={}){
   let releaseSession;
   const sessionGate=deferSession?new Promise(resolve=>{releaseSession=resolve;}):null;
   let releaseImport;
@@ -59,7 +60,7 @@ function makeApp({authenticated=true,active=true,assistantResult=null,multipleIs
   const calls=[];
   async function fetchStub(url,opts={}){
     calls.push({url,opts});let body=null,code=200,link=null;
-    if(url==='/api/session'){if(sessionGate)await sessionGate;body=session();}
+    if(url==='/api/session'){if(sessionGate)await sessionGate;if(sessionFailure){code=503;body={error:'backend unavailable'};}else body=session();}
     else if(url==='/api/my-repos/demo')body={id:'demo',graph:GRAPH};
     else if(url==='/api/demo')body={...GRAPH,source:'demo',url:'',owner:'Repoworld Studio',name:'Orbit Commerce',warnings:['Fictional demonstration only.']};
     else if(typeof url==='string'&&url.startsWith('https://api.github.com/repos/')&&url.includes('/pulls/')&&url.includes('/files?')){
@@ -131,6 +132,8 @@ function makeApp({authenticated=true,active=true,assistantResult=null,multipleIs
   const store=new Map();
   if(storedLastRepo!==null)store.set('repoworld:last-public-repo:v1',storedLastRepo);
   if(storedOfflineCity!==null)store.set('repoworld:offline-city:v1',storedOfflineCity);
+  if(storedVault!==null)store.set('gitcity:public-recovery-vault:v1',storedVault);
+  if(storedVaultEnabled!==null)store.set('gitcity:public-recovery-opt-in:v1',storedVaultEnabled);
   const localStorage={
     getItem(key){if(storageThrows)throw Error('Storage blocked');return store.has(key)?store.get(key):null;},
     setItem(key,value){if(storageThrows)throw Error('Storage blocked');store.set(key,String(value));},
@@ -153,6 +156,7 @@ function makeApp({authenticated=true,active=true,assistantResult=null,multipleIs
   vm.runInNewContext(browserIssueSource,sandbox);
   vm.runInNewContext(issueNotesSource,sandbox);
   vm.runInNewContext(offlineCitySource,sandbox);
+  vm.runInNewContext(vaultSource,sandbox);
   vm.runInNewContext(pullImpactSource,sandbox);
   vm.runInNewContext(pullReviewSource,sandbox);
   vm.runInNewContext(source,sandbox);
@@ -1133,4 +1137,77 @@ test('PR Review Map re-evaluates linked modules after another PR page loads',asy
  assert.match(ui.el('prReviewOverview').textContent,/1 direct importer/);
  assert.equal(ui.renderer.prReviewPlan.changedModules[0].nodeId,'api');
  assert.equal(ui.calls.filter(c=>c.url.includes('/pulls/25/files?')).length,2);
+});
+
+
+test('browser recovery is opt-in and saves public city only after user enables it',async()=>{
+ const ui=makeApp({active:true});await ui.boot();
+ assert.equal(ui.window.GitCityRecoveryVault.enabled(ui.window.localStorage),false);
+ assert.equal(ui.el('vaultRecovery').hidden,true);
+ assert.equal(ui.store.has('gitcity:public-recovery-vault:v1'),false);
+ ui.el('vaultToggle').listeners.click();
+ assert.equal(ui.window.GitCityRecoveryVault.enabled(ui.window.localStorage),true);
+ assert.equal(ui.el('vaultRecovery').hidden,false);
+ assert.equal(ui.el('vaultEmptyCities').children.length,1);
+ assert.match(ui.el('vaultMenuStatus').textContent,/1 of 8 public cities/);
+ const value=ui.store.get('gitcity:public-recovery-vault:v1');
+ assert.ok(value.includes('testowner/demo-city'));
+ assert.doesNotMatch(value,/csrf-test|token_hash|sessionCookie|assistantAnswer/);
+});
+
+test('a Render-style anonymous session reset still offers offline public city recovery',async()=>{
+ const first=makeApp({active:true});await first.boot();
+ first.el('vaultToggle').listeners.click();
+ const bytes=first.store.get('gitcity:public-recovery-vault:v1');
+ assert.ok(bytes);
+ const restored=makeApp({active:false,storedVault:bytes,storedVaultEnabled:'1'});await restored.boot();
+ assert.equal(restored.el('emptyState').hidden,false);
+ assert.equal(restored.el('vaultRecovery').hidden,false);
+ assert.equal(restored.el('vaultEmptyCities').children.length,1);
+ const count=restored.calls.length;
+ await restored.el('vaultEmptyCities').children[0].listeners.click();
+ for(let i=0;i<5;i++)await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(restored.el('canvasStage').hidden,false);
+ assert.match(restored.el('cityStatusText').textContent,/LOCAL OFFLINE PREVIEW/);
+ assert.equal(restored.el('activeRepoTitle').textContent,'Demo City');
+ assert.equal(restored.calls.filter(c=>c.url==='/api/my-repos'&&c.opts.method==='POST').length,0);
+ assert.equal(restored.calls.length,count,'Offline recovery must not fetch GitHub or server tools');
+ assert.equal(restored.el('reconnectOfflineCity').hidden,false);
+ restored.el('reconnectOfflineCity').listeners.click();
+ assert.equal(restored.el('addRepoDialog').open,true);
+ assert.equal(restored.el('importInput').value,'testowner/demo-city');
+ assert.equal(restored.calls.length,count,'Reconnect must await explicit import confirmation');
+});
+
+test('even with backend unavailable the recovery vault opens offline without server calls',async()=>{
+ const first=makeApp({active:true});await first.boot();
+ first.el('vaultToggle').listeners.click();
+ const data=first.store.get('gitcity:public-recovery-vault:v1');
+ const second=makeApp({active:false,sessionFailure:true,storedVault:data,storedVaultEnabled:'1'});
+ await second.boot();
+ assert.equal(second.el('loadingView').hidden,true);
+ assert.equal(second.el('vaultRecovery').hidden,false);
+ assert.equal(second.calls.filter(c=>c.url==='/api/session').length,1);
+ const initial=second.calls.length;
+ await second.el('vaultEmptyCities').children[0].listeners.click();
+ for(let i=0;i<5;i++)await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(second.calls.length,initial);
+ assert.equal(second.el('canvasStage').hidden,false);
+ assert.equal(second.el('inspector').hidden,true);
+ assert.match(second.el('cityStatusText').textContent,/OFFLINE/);
+});
+
+test('pausing recovery leaves saved data, clearing maps never destroys manual backup',async()=>{
+ const user=makeApp({active:true});await user.boot();
+ user.el('vaultToggle').listeners.click();
+ user.el('saveOfflineCity').listeners.click();
+ const manual=user.store.get('repoworld:offline-city:v1');
+ user.el('vaultToggle').listeners.click();
+ assert.equal(user.window.GitCityRecoveryVault.enabled(user.window.localStorage),false);
+ assert.equal(user.el('vaultEmptyCities').children.length,1);
+ user.el('vaultClear').listeners.click();
+ assert.equal(user.el('vaultRecovery').hidden,true);
+ assert.equal(user.store.has('gitcity:public-recovery-vault:v1'),false);
+ assert.equal(user.store.get('repoworld:offline-city:v1'),manual);
+ assert.equal(user.store.has('gitcity:public-recovery-opt-in:v1'),false);
 });
