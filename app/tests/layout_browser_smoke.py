@@ -248,7 +248,7 @@ async def verify(browser,width,height):
     async with page.expect_download(timeout=10000) as download_info:
       await page.locator('#downloadOfflineCity').click()
     download=await download_info.value
-    assert download.suggested_filename=='repoworld-pallets-flask.json'
+    assert download.suggested_filename=='gitcity-pallets-flask.json'
     archive_path=await download.path()
     portable=json.loads(Path(archive_path).read_text(encoding='utf-8'))
     assert portable['format']=='repoworld-public-city-v1'
