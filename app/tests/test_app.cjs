@@ -529,7 +529,7 @@ test('direct links keep GitCity loading until the public import finishes',async(
   const ui=makeApp({active:false,routePath:'/testowner/demo-city',deferImport:true});
   await ui.boot();
   assert.equal(ui.el('loadingView').hidden,false);
-  assert.equal(ui.el('canvasStage').hidden,true);
+  assert.equal(ui.el('addRepoDialog').open,undefined);
   assert.match(ui.el('loadingHint').textContent,/GitHub sources/);
   assert.equal(ui.calls.filter(c=>c.url==='/api/my-repos'&&c.opts.method==='POST').length,1);
   ui.releaseImport();
