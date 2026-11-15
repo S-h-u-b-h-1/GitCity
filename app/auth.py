@@ -60,6 +60,10 @@ def _database() -> sqlite3.Connection:
         user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
         active_repo TEXT
     );
+    -- Shared public source-derived cities only: no guest IDs, credentials or session data.
+    CREATE TABLE IF NOT EXISTS public_city_cache (
+        repo_key TEXT PRIMARY KEY, graph_json TEXT NOT NULL, cached_at INTEGER NOT NULL
+    );
     """)
     return conn
 

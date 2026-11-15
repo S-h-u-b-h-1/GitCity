@@ -157,6 +157,10 @@ async def test_expired_cache_no_longer_bypasses_import_budget(monkeypatch,tmp_pa
         key='public/demo'
         timestamp,graph=github._GRAPH_CACHE[key]
         github._GRAPH_CACHE[key]=(timestamp-github.GRAPH_TTL_SECONDS-1,graph)
+        # Invalidate both tiers: expiring only RAM should correctly use SQLite.
+        with auth._database() as db:
+            db.execute('UPDATE public_city_cache SET cached_at=? WHERE repo_key=?',
+                       (int(__import__('time').time())-github.PUBLIC_CITY_CACHE_TTL_SECONDS-10,key))
         blocked=await client.post('/api/my-repos',json={'url':'public/demo'},headers=headers)
         assert blocked.status_code==429
     github._GRAPH_CACHE.clear()
@@ -250,3 +254,87 @@ async def test_cache_reuse_bypasses_burst_and_work_queue(monkeypatch,tmp_path):
         assert main._import_jobs==0
     github._GRAPH_CACHE.clear()
     main._import_locks.clear()
+
+@pytest.mark.asyncio
+async def test_shared_city_cache_survives_memory_eviction_across_anon_visitors(monkeypatch,tmp_path):
+    from app import github
+    env_setup(monkeypatch,tmp_path)
+    monkeypatch.setenv('REPOWORLD_IMPORT_GLOBAL_HOURLY','1')
+    monkeypatch.setenv('REPOWORLD_IMPORT_GUEST_HOURLY','1')
+    monkeypatch.setenv('REPOWORLD_IMPORT_GLOBAL_5MIN','1')
+    monkeypatch.setenv('REPOWORLD_IMPORT_GUEST_5MIN','1')
+    monkeypatch.setenv('REPOWORLD_EPHEMERAL_DEMO','1')
+    monkeypatch.delenv('GITHUB_TOKEN',raising=False)
+    github._GRAPH_CACHE.clear()
+    main._import_locks.clear()
+    calls=[]
+    async def source(owner,repo,client=None):
+        calls.append((owner,repo))
+        graph=build_demo()
+        graph.update(owner=owner,name=repo,url=f'https://github.com/{owner}/{repo}',source='github')
+        return graph
+    monkeypatch.setattr('app.archive_import.get_public_archive_graph',source)
+    async with (httpx.AsyncClient(transport=httpx.ASGITransport(app=main.app),base_url='https://repo.example') as a,
+                httpx.AsyncClient(transport=httpx.ASGITransport(app=main.app),base_url='https://repo.example') as b):
+        headers_a={'X-RepoWorld-CSRF':(await a.get('/api/session')).json()['csrf']}
+        headers_b={'X-RepoWorld-CSRF':(await b.get('/api/session')).json()['csrf']}
+        first=await a.post('/api/my-repos',json={'url':'shared/demo'},headers=headers_a)
+        assert first.status_code==200,first.text
+        assert len(calls)==1
+        with auth._database() as db:
+            assert db.execute('SELECT COUNT(*) FROM public_city_cache').fetchone()[0]==1
+        # Mimic the app process losing its short-lived RAM cache.
+        github._GRAPH_CACHE.clear()
+        second=await b.post('/api/my-repos',json={'url':'SHARED/demo'},headers=headers_b)
+        assert second.status_code==200,second.text
+        assert second.json()['cacheStatus']=='recent-public-snapshot'
+        assert len(calls)==1
+        assert second.json()['id']!=first.json()['id']
+        assert (await b.get('/api/my-repos/'+first.json()['id'])).status_code==404
+    github._GRAPH_CACHE.clear()
+    main._import_locks.clear()
+
+def test_public_cache_rejects_mismatched_and_nonpublic_graphs(monkeypatch,tmp_path):
+    from app import github
+    env_setup(monkeypatch,tmp_path)
+    github._GRAPH_CACHE.clear()
+    bad=build_demo()
+    bad.update(owner='org',name='repo',source='demo',url='https://github.com/org/repo')
+    github._cache_public_graph('org','repo',bad)
+    mismatch=build_demo()
+    mismatch.update(owner='elsewhere',name='repo',source='github',url='https://github.com/elsewhere/repo')
+    github._cache_public_graph('org','repo',mismatch)
+    with auth._database() as db:
+        assert db.execute('SELECT COUNT(*) FROM public_city_cache').fetchone()[0]==0
+    assert github.cached_public_graph('org','repo') is None
+    github._GRAPH_CACHE.clear()
+
+def test_shared_cache_bounds_rows_and_graph_bytes(monkeypatch,tmp_path):
+    from app import github
+    env_setup(monkeypatch,tmp_path)
+    github._GRAPH_CACHE.clear()
+    for i in range(github.PUBLIC_CITY_CACHE_MAX_ENTRIES+4):
+        graph=build_demo()
+        graph.update(owner='org',name=f'city-{i}',source='github',url=f'https://github.com/org/city-{i}')
+        github._cache_public_graph('org',f'city-{i}',graph)
+    with auth._database() as db:
+        rows=db.execute('SELECT COUNT(*) FROM public_city_cache').fetchone()[0]
+    assert rows==github.PUBLIC_CITY_CACHE_MAX_ENTRIES
+    huge=build_demo()
+    huge.update(owner='org',name='huge',source='github',url='https://github.com/org/huge',
+                description='X'*(github.PUBLIC_CITY_CACHE_MAX_GRAPH_BYTES+1))
+    github._cache_public_graph('org','huge',huge)
+    with auth._database() as db:
+        assert db.execute('SELECT COUNT(*) FROM public_city_cache').fetchone()[0]==rows
+    github._GRAPH_CACHE.clear()
+
+def test_balanced_higher_import_quotas_default_to_large_but_bounded_values(monkeypatch,tmp_path):
+    env_setup(monkeypatch,tmp_path)
+    for key in ('REPOWORLD_IMPORT_GLOBAL_HOURLY','REPOWORLD_IMPORT_GUEST_HOURLY',
+                'REPOWORLD_IMPORT_GLOBAL_5MIN','REPOWORLD_IMPORT_GUEST_5MIN'):
+        monkeypatch.delenv(key,raising=False)
+    from app.quotas import _env_int
+    assert _env_int('REPOWORLD_IMPORT_GLOBAL_HOURLY',300)==300
+    assert _env_int('REPOWORLD_IMPORT_GUEST_HOURLY',100)==100
+    assert _env_int('REPOWORLD_IMPORT_GLOBAL_5MIN',30)==30
+    assert _env_int('REPOWORLD_IMPORT_GUEST_5MIN',15)==15
