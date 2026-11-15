@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from collections import defaultdict, deque
 import asyncio
+from contextlib import asynccontextmanager
 from pathlib import Path
 import logging
 import os
@@ -48,6 +49,34 @@ def _import_lock(key: str) -> asyncio.Lock:
     lock = asyncio.Lock()
     _import_locks[key] = lock
     return lock
+
+
+# Bound RAM and network bursts for the free single-worker backend.
+# Cached city reads do not enter this limiter.
+_import_slots = asyncio.Semaphore(2)
+_import_jobs = 0
+_IMPORT_MAX_ACTIVE_AND_QUEUED = 6
+
+
+@asynccontextmanager
+async def _expensive_import_slot():
+    """Permit two new GitHub fetches and four queued imports per worker."""
+    global _import_jobs
+    if _import_jobs >= _IMPORT_MAX_ACTIVE_AND_QUEUED:
+        raise RepoError('GitCity is handling several new cities. Retry shortly.', 503, retry_after=15)
+    _import_jobs += 1
+    acquired = False
+    try:
+        try:
+            await asyncio.wait_for(_import_slots.acquire(), timeout=20)
+        except asyncio.TimeoutError as exc:
+            raise RepoError('GitCity import queue is busy. Retry shortly.', 503, retry_after=15) from exc
+        acquired = True
+        yield
+    finally:
+        if acquired:
+            _import_slots.release()
+        _import_jobs -= 1
 
 
 class GraphRequest(BaseModel):
@@ -216,9 +245,10 @@ async def import_my_repo(request: Request, payload: ImportRequest):
         # Reusing a confirmed, recent public graph costs no GitHub/codeload I/O.
         # Never waive quotas for cache misses, forced refreshes or failed imports.
         if payload.refresh:
-            _limit(request, f"import:{uid}", count=30)
-            reserve_import(uid, request.client.host if request.client else "unknown")
-            graph = await get_repository_graph(payload.url, refresh=True)
+            async with _expensive_import_slot():
+                _limit(request, f"import:{uid}", count=30)
+                reserve_import(uid, request.client.host if request.client else "unknown")
+                graph = await get_repository_graph(payload.url, refresh=True)
             cached = False
         else:
             # One GitHub fetch per public repo even when two guests arrive
@@ -227,9 +257,10 @@ async def import_my_repo(request: Request, payload: ImportRequest):
                 graph = cached_public_graph(owner, repo)
                 cached = graph is not None
                 if not cached:
-                    _limit(request, f"import:{uid}", count=30)
-                    reserve_import(uid, request.client.host if request.client else "unknown")
-                    graph = await get_repository_graph(payload.url)
+                    async with _expensive_import_slot():
+                        _limit(request, f"import:{uid}", count=30)
+                        reserve_import(uid, request.client.host if request.client else "unknown")
+                        graph = await get_repository_graph(payload.url)
         saved = save_repo(uid, graph)
         if cached:
             saved['cacheStatus'] = 'recent-public-snapshot'
