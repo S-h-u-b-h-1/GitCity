@@ -20,7 +20,7 @@ from fastapi import HTTPException, Request, Response
 
 SESSION_COOKIE = "rw_session"
 SESSION_AGE = 14 * 24 * 3600
-MAX_REPOS = 6
+MAX_REPOS = 15
 
 
 def _hash(value: str) -> str:

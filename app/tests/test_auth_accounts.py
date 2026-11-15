@@ -104,6 +104,7 @@ async def test_new_browser_cookie_cannot_access_old_city(monkeypatch):
 async def test_saved_city_limit_with_refresh_allowed():
     with auth._database() as db:
         db.execute("INSERT INTO users VALUES (?,?,?,?,?,?,?,?)",("u", "guest", "u", "Guest", "guest", "", "", 1))
+    assert auth.MAX_REPOS == 15
     for i in range(auth.MAX_REPOS):
         graph=build_demo();graph.update(owner="test",name="repo-"+str(i))
         auth.save_repo("u",graph)

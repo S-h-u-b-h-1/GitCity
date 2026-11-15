@@ -77,7 +77,7 @@
         ? body.detail.map(item=>item?.msg||'Invalid request').join('; ')
         : body.detail||body.error||`Request failed (HTTP ${response.status}).`;
       const cooldown=Number(response.headers?.get?.('Retry-After'));
-      const hint=response.status===429&&Number.isFinite(cooldown)&&cooldown>0
+      const hint=(response.status===429||response.status===503)&&Number.isFinite(cooldown)&&cooldown>0
         ? ` Try again in about ${Math.ceil(cooldown/60)} minute${cooldown>60?'s':''}.` : '';
       const error=new Error(String(detail)+hint);
       error.status=response.status;
