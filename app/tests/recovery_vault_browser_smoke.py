@@ -93,6 +93,7 @@ async def exercise(browser,width,height):
         assert "LOCAL OFFLINE PREVIEW" in label,label
         assert await lost.evaluate("window.__VAULT_HTTP_CALLS__.length")==initial
         assert not await lost.evaluate("document.documentElement.scrollWidth>innerWidth")
+        await lost.locator("#repoMenuButton").click()
         assert await lost.locator("#reconnectOfflineCity").is_visible()
         await lost.locator("#reconnectOfflineCity").click()
         assert await lost.locator("#addRepoDialog").is_visible()
