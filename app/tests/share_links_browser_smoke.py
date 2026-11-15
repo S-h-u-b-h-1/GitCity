@@ -24,6 +24,9 @@ def offline_assets():
     html = (ROOT / 'app/static/index.html').read_text()
     for tag in ('<link rel="stylesheet" href="/static/styles.css">',
                 '<script defer src="/static/world.js"></script>',
+                '<script defer src="/static/browser-radar.js"></script>',
+                '<script defer src="/static/investigation-notes.js"></script>',
+                '<script defer src="/static/offline-city.js"></script>',
                 '<script defer src="/static/app.js"></script>'):
         html = html.replace(tag, '')
     css = (ROOT / 'app/static/styles.css').read_text()
