@@ -144,7 +144,7 @@ test('guest users without repositories get a single add-repo empty state',async(
   assert.equal(ui.el('workspace').hidden,false);
   assert.equal(ui.el('emptyState').hidden,false);
   assert.equal(ui.el('canvasStage').hidden,true);
-  assert.equal(ui.el('activeRepoTitle').textContent,'RepoWorld');
+  assert.equal(ui.el('activeRepoTitle').textContent,'GitCity');
   ui.el('emptyAddRepo').listeners.click();
   assert.equal(ui.el('addRepoDialog').open,true);
 });
@@ -812,7 +812,7 @@ test('portable map download is manually triggered, uses public JSON and never ca
   assert.equal(ui.el('downloadOfflineCity').hidden,false);
   ui.el('downloadOfflineCity').listeners.click();
   assert.equal(ui.objectUrls.length,1);
-  assert.equal(ui.document.body.children[0].download,'repoworld-testowner-demo-city.json');
+  assert.equal(ui.document.body.children[0].download,'gitcity-testowner-demo-city.json');
   assert.equal(ui.document.body.children[0].clicked,true);
   assert.equal(ui.calls.length,before);
 });
