@@ -1155,9 +1155,15 @@
     });
   }
   async function boot(){
-    showView();
+    // Keep the branded loading view visible until the first API session is
+    // genuinely ready. Render Free may cold-start after idle; do not display
+    // an empty, interactive canvas while the backend has not answered.
+    const waking=setTimeout(()=>{
+      setText('loadingHint','The free backend may be waking after inactivity. Connecting automatically…');
+    },8000);
     try{
       await refreshSession();
+      showView();
       const requested=deepLinkedRepo();
       // A shared URL never triggers a network import or AI call automatically.
       // Existing browser snapshots open immediately; new browsers must confirm
@@ -1173,7 +1179,9 @@
         }
       }
     }catch(e){
-      showEmpty();toast('Could not open this browser workspace: '+e.message,true);
+      showView();showEmpty();toast('Could not open this browser workspace: '+e.message,true);
+    }finally{
+      clearTimeout(waking);
     }
   }
   document.addEventListener('DOMContentLoaded',()=>{bindEvents();boot();});
