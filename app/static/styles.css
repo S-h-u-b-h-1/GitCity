@@ -570,3 +570,8 @@
  #searchDialog .pr-query button{min-height:44px}
  #searchDialog .pr-results{max-height:42dvh}
 }
+
+/* Explicit, on-demand pagination for larger GitHub PRs. */
+#searchDialog .pr-more{width:100%;margin:12px 0 2px;min-height:44px;border:1px solid #7ba6c6;border-radius:9px;background:#19394f;color:#d7efff;font-size:12px;font-weight:630;text-align:center}
+#searchDialog .pr-more:hover,#searchDialog .pr-more:focus-visible{background:#234b68;border-color:#abd6f7}
+#searchDialog .pr-more:disabled{opacity:.65;cursor:wait}

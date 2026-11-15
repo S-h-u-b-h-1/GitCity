@@ -558,6 +558,8 @@
     $('prResults').replaceChildren();
     $('prLoad').disabled=false;
     $('prClear').hidden=true;
+    $('prMore').hidden=true;
+    $('prMore').disabled=false;
     $('prOpenGithub').hidden=true;
     $('prStatus').classList.toggle('is-error',false);
     setText('prStatus','Enter a pull request number or an exact GitHub URL for this repository.');
@@ -571,12 +573,18 @@
     $('prOpenGithub').href='https://github.com/'+repo+'/pull/'+result.number;
     $('prOpenGithub').hidden=false;
     $('prClear').hidden=false;
-    const partial=result.partial?' · FIRST 100 FILES ONLY / PARTIAL':'';
+    $('prMore').hidden=!result.nextPage;
+    $('prMore').disabled=false;
+    const partial=result.nextPage?' · MORE GITHUB FILES AVAILABLE':
+      result.capped?' · LIMIT 300 FILES · SEE GITHUB':
+      result.invalidRecords?' · SOME INVALID RECORDS OMITTED':'';
     setText('prStatus',result.files.length+' GITHUB-REPORTED FILE'+(result.files.length===1?'':'S')+
       ' · '+result.mapped+' FILE MATCH'+(result.mapped===1?'':'ES')+
       ' IN CITY · '+result.unmapped+' UNMAPPED'+partial);
-    setText('prScope',result.scope+
-      (result.partial?' GitHub returned a partial first page; more changed files may exist.':''));
+    setText('prScope',result.scope+(result.nextPage?
+      ' More changed files are available; use Load next 100 files to retrieve them.':
+      result.capped?' First 300 files only; additional changes remain on GitHub.':
+      result.invalidRecords?' Some records were omitted as unsupported.':''));
     for(const file of result.files){
       const target=file.mapped;
       const row=document.createElement(target?'button':'div');
@@ -623,12 +631,47 @@
       const result=await tool.load(graph,number);
       if(rev!==state.prRevision||state.graph!==graph)return;
       state.prPreview=result;renderPullPreview(result);
+      const repoPath=repositoryPath(tool.repositoryFromGraph(graph));
+      if(repoPath&&window.history?.replaceState){
+        try{window.history.replaceState(null,'',repoPath+'/pull/'+number);}
+        catch{/* Read-only browser environments may not permit history updates. */}
+      }
     }catch(error){
       if(rev!==state.prRevision||state.graph!==graph)return;
       $('prStatus').classList.toggle('is-error',true);
       setText('prStatus','Could not inspect PR #'+number+': '+error.message);
     }finally{
       if(rev===state.prRevision)$('prLoad').disabled=false;
+    }
+  }
+  async function loadMorePullImpact(){
+    const tool=window.GitCityPullImpact,previous=state.prPreview;
+    if(!tool||!previous?.nextPage||state.offline||!state.graph)return;
+    const rev=state.prRevision,graph=state.graph;
+    $('prMore').disabled=true;
+    setText('prMore','Loading next 100 files…');
+    try{
+      const result=await tool.loadMore(graph,previous);
+      if(rev!==state.prRevision||graph!==state.graph)return;
+      state.prPreview=result;renderPullPreview(result);
+    }catch(error){
+      if(rev!==state.prRevision||graph!==state.graph)return;
+      $('prStatus').classList.toggle('is-error',true);
+      setText('prStatus','Additional GitHub files could not be loaded: '+error.message+
+        ' The already inspected files remain available.');
+    }finally{
+      if(rev===state.prRevision){
+        $('prMore').disabled=false;
+        setText('prMore','Load next 100 files');
+      }
+    }
+  }
+  function clearPullPreview(){
+    resetPullPreview();
+    const path=repositoryPath(publicRepoFromGraph(state.graph));
+    if(path&&window.history?.replaceState&&linkedPullRequest()){
+      try{window.history.replaceState(null,'',path);}
+      catch{/* URL restoration may be unavailable. */}
     }
   }
   function openFind(query='',tab='ask'){
@@ -1287,7 +1330,8 @@
     $('findButton').addEventListener('click',()=>openFind('','find'));
     $('prImpactShortcut').addEventListener('click',()=>openFind('','pr'));
     $('prLoad').addEventListener('click',()=>loadPullImpact($('prInput').value));
-    $('prClear').addEventListener('click',resetPullPreview);
+    $('prMore').addEventListener('click',loadMorePullImpact);
+    $('prClear').addEventListener('click',clearPullPreview);
     $('prInput').addEventListener('keydown',event=>{
       if(event.key==='Enter'){event.preventDefault();loadPullImpact($('prInput').value);}
     });
