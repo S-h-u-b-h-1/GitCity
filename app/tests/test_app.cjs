@@ -8,6 +8,7 @@ const source=fs.readFileSync(path.join(__dirname,'../static/app.js'),'utf8');
 const browserIssueSource=fs.readFileSync(path.join(__dirname,'../static/browser-radar.js'),'utf8');
 const issueNotesSource=fs.readFileSync(path.join(__dirname,'../static/investigation-notes.js'),'utf8');
 const offlineCitySource=fs.readFileSync(path.join(__dirname,'../static/offline-city.js'),'utf8');
+const pullImpactSource=fs.readFileSync(path.join(__dirname,'../static/pr-impact.js'),'utf8');
 const GRAPH={name:'Demo City',owner:'testowner',branch:'main',source:'github',url:'https://github.com/testowner/demo-city',
   nodes:[{id:'web',name:'Web',kind:'frontend',path:'apps/web',fileCount:6,files:['apps/web/index.ts'],description:'Website'},
     {id:'api',name:'API',kind:'api',path:'services/api',fileCount:5,files:['services/api/index.py'],description:'API service'}],
@@ -32,7 +33,7 @@ class FakeElement{
   focus(){}
   closest(){return null;}
 }
-function makeApp({authenticated=true,active=true,assistantResult=null,multipleIssues=false,importFailure=null,issueFailure=null,issueFailureMessage=null,browserIssues=null,browserIssueError=null,sourceLeadResult=null,sourceLeadError=null,deepLink='',routePath='/',storedLastRepo=null,storedOfflineCity=null,storageThrows=false,deferSession=false,deferImport=false}={}){
+function makeApp({authenticated=true,active=true,assistantResult=null,multipleIssues=false,importFailure=null,issueFailure=null,issueFailureMessage=null,browserIssues=null,browserIssueError=null,sourceLeadResult=null,sourceLeadError=null,deepLink='',routePath='/',storedLastRepo=null,storedOfflineCity=null,storageThrows=false,deferSession=false,deferImport=false,prFiles=null,prFailure=null}={}){
   let releaseSession;
   const sessionGate=deferSession?new Promise(resolve=>{releaseSession=resolve;}):null;
   let releaseImport;
@@ -40,7 +41,7 @@ function makeApp({authenticated=true,active=true,assistantResult=null,multipleIs
   const elements=new Map();
   const el=id=>{if(!elements.has(id))elements.set(id,new FakeElement(['importInput','aiQuestion','searchInput','assistantQuestion'].includes(id)?'input':'div'));return elements.get(id);};
   const layers=['structure','dependencies','flows','hotspots'].map(n=>Object.assign(new FakeElement('button'),{dataset:{layer:n}}));
-  const compassTabs=['ask','issues','find'].map(n=>Object.assign(new FakeElement('button'),{dataset:{compassTab:n}}));
+  const compassTabs=['ask','issues','find','pr'].map(n=>Object.assign(new FakeElement('button'),{dataset:{compassTab:n}}));
   const document={
     addEventListener(ev,fn){if(ev==='DOMContentLoaded')this.onload=fn;},
     getElementById:el,
@@ -60,6 +61,11 @@ function makeApp({authenticated=true,active=true,assistantResult=null,multipleIs
     if(url==='/api/session'){if(sessionGate)await sessionGate;body=session();}
     else if(url==='/api/my-repos/demo')body={id:'demo',graph:GRAPH};
     else if(url==='/api/demo')body={...GRAPH,source:'demo',url:'',owner:'Repoworld Studio',name:'Orbit Commerce',warnings:['Fictional demonstration only.']};
+    else if(typeof url==='string'&&url.startsWith('https://api.github.com/repos/')&&url.includes('/pulls/')&&url.includes('/files?')){
+      if(prFailure){code=prFailure.status;body={message:prFailure.message};}
+      else body=prFiles||[{filename:'services/api/index.py',status:'modified',additions:4,deletions:1},
+                           {filename:'other/unmapped.py',status:'added',additions:9,deletions:0}];
+    }
     else if(typeof url==='string'&&url.startsWith('https://api.github.com/repos/')){
       if(browserIssueError){code=browserIssueError;body={message:'API rate limited from browser'};}
       else body=browserIssues||[];
@@ -111,6 +117,7 @@ function makeApp({authenticated=true,active=true,assistantResult=null,multipleIs
     setMode(mode){this.mode=mode;}
     setTraffic(v){this.traffic=v;}
     setImpactTrace(trace){this.trace=trace;}
+    setPullChangedNodes(ids){this.prChangedNodes=ids;}
     resetCamera(){this.reset=true;}
   }
   const copied=[];
@@ -139,6 +146,7 @@ function makeApp({authenticated=true,active=true,assistantResult=null,multipleIs
   vm.runInNewContext(browserIssueSource,sandbox);
   vm.runInNewContext(issueNotesSource,sandbox);
   vm.runInNewContext(offlineCitySource,sandbox);
+  vm.runInNewContext(pullImpactSource,sandbox);
   vm.runInNewContext(source,sandbox);
   const flush=()=>new Promise(resolve=>setImmediate(resolve));
   async function boot(){document.onload();for(let i=0;i<4;i++)await flush();}
@@ -955,4 +963,85 @@ test('invalid portable files and blocked browser storage leave the current city 
   assert.equal(blocked.renderer.graph.name,'Demo City');
   assert.equal(blocked.store.has('repoworld:offline-city:v1'),false);
   assert.equal(blocked.calls.filter(c=>c.url.endsWith('/assistant')||c.url==='/api/my-repos').length,0);
+});
+
+
+test('PR impact tab loads public changed files, qualifies mappings and highlights only known buildings',async()=>{
+  const ui=makeApp({active:true});
+  await ui.boot();
+  ui.el('prImpactShortcut').listeners.click();
+  assert.equal(ui.el('searchDialog').open,true);
+  assert.equal(ui.el('prTab').hidden,false);
+  assert.equal(ui.compassTabs[3].classList.contains('active'),true);
+  ui.el('prInput').value='#25';
+  await ui.el('prLoad').listeners.click();
+  for(let i=0;i<5;i++)await new Promise(resolve=>setImmediate(resolve));
+  const requests=ui.calls.filter(call=>call.url.includes('/pulls/25/files?'));
+  assert.equal(requests.length,1);
+  assert.equal(requests[0].opts.credentials,'omit');
+  assert.equal(requests[0].opts.mode,'cors');
+  assert.deepEqual(Array.from(ui.renderer.prChangedNodes),['api']);
+  assert.match(ui.el('prStatus').textContent,/2 GITHUB-REPORTED FILES/);
+  assert.match(ui.el('prStatus').textContent,/1 UNMAPPED/);
+  assert.equal(ui.el('prResults').children.length,2);
+  assert.equal(ui.el('prResults').children[0].dataset.evidence,'indexed-file');
+  assert.equal(ui.el('prResults').children[1].dataset.evidence,'unmapped');
+  assert.equal(ui.el('prOpenGithub').href,'https://github.com/testowner/demo-city/pull/25');
+  assert.equal(ui.el('prOpenGithub').hidden,false);
+  ui.el('prResults').children[0].listeners.click();
+  assert.equal(ui.el('inspector').hidden,false);
+  assert.equal(ui.el('inspectorName').textContent,'API');
+  ui.el('prClear').listeners.click();
+  assert.deepEqual(Array.from(ui.renderer.prChangedNodes),[]);
+  assert.equal(ui.el('prResults').children.length,0);
+  assert.equal(ui.el('prOpenGithub').hidden,true);
+});
+
+test('PR impact input refuses cross-repository URLs without network calls',async()=>{
+  const ui=makeApp({active:true});
+  await ui.boot();
+  ui.el('mapCommandTrigger').listeners.click();
+  ui.compassTabs[3].listeners.click();
+  ui.el('prInput').value='https://github.com/attacker/different/pull/25';
+  await ui.el('prLoad').listeners.click();
+  for(let i=0;i<4;i++)await new Promise(resolve=>setImmediate(resolve));
+  assert.match(ui.el('prStatus').textContent,/Enter a positive PR number/);
+  assert.equal(ui.calls.filter(c=>c.url.includes('/pulls/')).length,0);
+});
+
+test('PR impact reports a GitHub rate limit without inventing changed buildings',async()=>{
+  const ui=makeApp({active:true,prFailure:{status:429,message:'rate limit'}});
+  await ui.boot();
+  ui.el('prImpactShortcut').listeners.click();
+  ui.el('prInput').value='25';
+  await ui.el('prLoad').listeners.click();
+  for(let i=0;i<5;i++)await new Promise(resolve=>setImmediate(resolve));
+  assert.match(ui.el('prStatus').textContent,/rate-limiting/);
+  assert.equal(ui.el('prResults').children.length,0);
+  assert.equal(ui.el('prOpenGithub').hidden,true);
+  assert.deepEqual(Array.from(ui.renderer.prChangedNodes),[]);
+});
+
+test('canonical /owner/repo/pull/number opens saved repo then PR Impact without extra import',async()=>{
+  const ui=makeApp({active:true,routePath:'/testowner/demo-city/pull/25'});
+  await ui.boot();
+  for(let i=0;i<7;i++)await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(ui.location.pathname,'/testowner/demo-city/pull/25');
+  assert.equal(ui.el('searchDialog').open,true);
+  assert.equal(ui.el('prTab').hidden,false);
+  assert.equal(ui.el('prInput').value,'25');
+  assert.equal(ui.calls.filter(c=>c.url==='/api/my-repos'&&c.opts.method==='POST').length,0);
+  assert.equal(ui.calls.filter(c=>c.url.includes('/pulls/25/files?')).length,1);
+});
+
+test('canonical PR deep link imports public repository then previews changed files',async()=>{
+  const ui=makeApp({active:false,routePath:'/testowner/demo-city/pull/25'});
+  await ui.boot();
+  for(let i=0;i<10;i++)await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(ui.el('searchDialog').open,true);
+  assert.equal(ui.el('prTab').hidden,false);
+  assert.equal(ui.location.pathname,'/testowner/demo-city/pull/25');
+  assert.equal(ui.calls.filter(c=>c.url==='/api/my-repos'&&c.opts.method==='POST').length,1);
+  assert.equal(ui.calls.filter(c=>c.url.includes('/pulls/25/files?')).length,1);
+  assert.equal(ui.el('addRepoDialog').open,undefined);
 });
