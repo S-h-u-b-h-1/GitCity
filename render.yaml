@@ -30,9 +30,9 @@ services:
       - key: REPOWORLD_AI_GUEST_10MIN
         value: '2'
       - key: REPOWORLD_IMPORT_GLOBAL_HOURLY
-        value: '8'
+        value: '24'
       - key: REPOWORLD_IMPORT_GUEST_HOURLY
-        value: '2'
+        value: '10'
       - key: REPOWORLD_ISSUES_GLOBAL_HOURLY
         value: '12'
       - key: REPOWORLD_ISSUES_GUEST_HOURLY

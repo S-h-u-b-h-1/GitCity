@@ -68,3 +68,95 @@ def test_dev_mode_does_not_exhaust_public_key_budget(monkeypatch,tmp_path):
     for _ in range(100):reserve_ai('local','localhost')
     with auth._database() as db:
         assert db.execute("SELECT name FROM sqlite_master WHERE name='request_quotas'").fetchone() is None
+
+@pytest.mark.asyncio
+async def test_recent_public_city_reused_across_browsers_without_consuming_more_import_budget(monkeypatch,tmp_path):
+    from app import github
+    env_setup(monkeypatch,tmp_path)
+    monkeypatch.setenv('REPOWORLD_IMPORT_GLOBAL_HOURLY','1')
+    monkeypatch.setenv('REPOWORLD_IMPORT_GUEST_HOURLY','1')
+    monkeypatch.setenv('REPOWORLD_EPHEMERAL_DEMO','1')
+    monkeypatch.delenv('GITHUB_TOKEN',raising=False)
+    github._GRAPH_CACHE.clear()
+    main._import_locks.clear()
+    calls=[]
+    async def fake_archive(owner,repo,client=None):
+        calls.append((owner,repo))
+        graph=build_demo()
+        graph.update(owner=owner,name=repo,url=f'https://github.com/{owner}/{repo}',source='github')
+        return graph
+    monkeypatch.setattr('app.archive_import.get_public_archive_graph',fake_archive)
+    transport=httpx.ASGITransport(app=main.app)
+    async with (httpx.AsyncClient(transport=transport,base_url='https://repo.example') as first,
+                httpx.AsyncClient(transport=transport,base_url='https://repo.example') as second):
+        csrf1=(await first.get('/api/session')).json()['csrf']
+        csrf2=(await second.get('/api/session')).json()['csrf']
+        headers1={'X-RepoWorld-CSRF':csrf1}
+        headers2={'X-RepoWorld-CSRF':csrf2}
+        a=await first.post('/api/my-repos',json={'url':'public/demo'},headers=headers1)
+        b=await second.post('/api/my-repos',json={'url':'public/demo'},headers=headers2)
+        assert a.status_code==b.status_code==200,(a.text,b.text)
+        assert a.json().get('cacheStatus') is None
+        assert b.json().get('cacheStatus')=='recent-public-snapshot'
+        assert len(calls)==1
+        assert a.json()['id']!=b.json()['id']
+        # Reusing the graph doesn't give another guest access to saved IDs.
+        assert (await second.get('/api/my-repos/'+a.json()['id'])).status_code==404
+        # A new uncached repo still hits the original global limit.
+        denied=await second.post('/api/my-repos',json={'url':'public/another'},headers=headers2)
+        assert denied.status_code==429
+        assert 'global' in denied.text
+    github._GRAPH_CACHE.clear()
+    main._import_locks.clear()
+
+@pytest.mark.asyncio
+async def test_force_refresh_remains_budgeted_even_for_cached_public_city(monkeypatch,tmp_path):
+    from app import github
+    env_setup(monkeypatch,tmp_path)
+    monkeypatch.setenv('REPOWORLD_IMPORT_GUEST_HOURLY','1')
+    monkeypatch.setenv('REPOWORLD_IMPORT_GLOBAL_HOURLY','1')
+    monkeypatch.setenv('REPOWORLD_EPHEMERAL_DEMO','1')
+    monkeypatch.delenv('GITHUB_TOKEN',raising=False)
+    github._GRAPH_CACHE.clear()
+    main._import_locks.clear()
+    async def fake_archive(owner,repo,client=None):
+        graph=build_demo()
+        graph.update(owner=owner,name=repo,url=f'https://github.com/{owner}/{repo}',source='github')
+        return graph
+    monkeypatch.setattr('app.archive_import.get_public_archive_graph',fake_archive)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=main.app),base_url='https://repo.example') as client:
+        csrf=(await client.get('/api/session')).json()['csrf']
+        headers={'X-RepoWorld-CSRF':csrf}
+        assert (await client.post('/api/my-repos',json={'url':'public/demo'},headers=headers)).status_code==200
+        refresh=await client.post('/api/my-repos',json={'url':'public/demo','refresh':True},headers=headers)
+        assert refresh.status_code==429
+        assert (await client.get('/api/session')).json()['repositories'][0]['fullName']=='public/demo'
+    github._GRAPH_CACHE.clear()
+    main._import_locks.clear()
+
+@pytest.mark.asyncio
+async def test_expired_cache_no_longer_bypasses_import_budget(monkeypatch,tmp_path):
+    from app import github
+    env_setup(monkeypatch,tmp_path)
+    monkeypatch.setenv('REPOWORLD_IMPORT_GUEST_HOURLY','1')
+    monkeypatch.setenv('REPOWORLD_IMPORT_GLOBAL_HOURLY','1')
+    monkeypatch.setenv('REPOWORLD_EPHEMERAL_DEMO','1')
+    monkeypatch.delenv('GITHUB_TOKEN',raising=False)
+    github._GRAPH_CACHE.clear()
+    main._import_locks.clear()
+    async def fake_archive(owner,repo,client=None):
+        graph=build_demo()
+        graph.update(owner=owner,name=repo,url=f'https://github.com/{owner}/{repo}',source='github')
+        return graph
+    monkeypatch.setattr('app.archive_import.get_public_archive_graph',fake_archive)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=main.app),base_url='https://repo.example') as client:
+        csrf=(await client.get('/api/session')).json()['csrf']
+        headers={'X-RepoWorld-CSRF':csrf}
+        assert (await client.post('/api/my-repos',json={'url':'public/demo'},headers=headers)).status_code==200
+        key='public/demo'
+        timestamp,graph=github._GRAPH_CACHE[key]
+        github._GRAPH_CACHE[key]=(timestamp-github.GRAPH_TTL_SECONDS-1,graph)
+        blocked=await client.post('/api/my-repos',json={'url':'public/demo'},headers=headers)
+        assert blocked.status_code==429
+    github._GRAPH_CACHE.clear()
+    main._import_locks.clear()
