@@ -180,9 +180,13 @@ async def test_live_import_uses_remote_public_snapshot_without_spending_new_quot
         assert (await visitor2.get("/api/my-repos/"+a.json()["id"])).status_code==404
         # Remote cache hits have no new-import quota bucket.
         with auth._database() as db:
-            assert db.execute(
-                "SELECT count(*) FROM request_quotas WHERE quota_key LIKE 'Import global hourly:%'"
-            ).fetchone()[0]==0
+            has_quota_table=db.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='request_quotas'"
+            ).fetchone()
+            if has_quota_table:
+                assert db.execute(
+                    "SELECT count(*) FROM request_quotas WHERE quota_key LIKE 'Import global hourly:%'"
+                ).fetchone()[0]==0
     github._GRAPH_CACHE.clear()
     main._import_locks.clear()
 
