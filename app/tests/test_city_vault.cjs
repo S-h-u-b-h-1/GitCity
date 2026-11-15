@@ -105,7 +105,9 @@ test('rejects public snapshots that exceed per-city budget and never stores fict
  const huge=graph();
  huge.nodes=Array.from({length:72},(_,i)=>({
    id:'dir-'+i,path:'dir-'+i,name:'Module '+i,kind:'core',fileCount:1,
-   files:Array.from({length:16},(_,j)=>'p'+j+'/'+'x'.repeat(360)+'/'+i),symbols:[]
+   files:Array.from({length:16},(_,j)=>'p'+j+'/'+'x'.repeat(360)+'/'+i),
+   symbols:Array.from({length:12},(_,j)=>({name:'longSymbol'+j+'_'+('N'.repeat(80)),
+     file:'p'+j+'/'+'x'.repeat(360)+'/'+i}))
  }));
  assert.throws(()=>api.capture(huge,s),/browser recovery size limit/);
  assert.equal(api.list(s).length,0);
