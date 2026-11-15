@@ -43,7 +43,7 @@ async def test_demo_and_tour_http():
         assert r.status_code == 401
         assert 'browser' in r.json()['detail']
         health = (await client.get('/api/health')).json()
-        assert health['ok'] and health['product'] == 'RepoWorld'
+        assert health['ok'] and health['product'] == 'GitCity'
 
 
 @pytest.mark.asyncio
@@ -51,7 +51,7 @@ async def test_home_and_static_csp():
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url='http://testserver') as client:
         r = await client.get('/')
-        assert r.status_code == 200 and '<title>RepoWorld' in r.text
+        assert r.status_code == 200 and '<title>GitCity' in r.text
         assert "script-src 'self'" in r.headers['content-security-policy']
         assert "connect-src 'self' https://api.github.com;" in r.headers['content-security-policy']
         assert 'X-Frame-Options'.lower() in {k.lower() for k in r.headers}

@@ -568,11 +568,22 @@ test('legacy query URLs still open and migrate to canonical repository paths',as
 });
 
 test('invalid owner/repo paths and unsafe encodings never initiate imports',async()=>{
-  for(const routePath of ['/evil/%2Fsecret','/owner/repo/extra','/owner/..','/owner/.env','//owner/repo']){
+  for(const routePath of ['/evil/%2Fsecret','/owner/repo/extra','/owner/..','/owner/%2Fsecret','//owner/repo']){
     const ui=makeApp({active:false,routePath});await ui.boot();
     assert.equal(ui.el('addRepoDialog').open,undefined,routePath);
     assert.equal(ui.calls.filter(c=>c.url==='/api/my-repos'&&c.opts.method==='POST').length,0,routePath);
   }
+});
+
+test('dot-prefixed repository names obey the same parser rules as the backend',async()=>{
+  // A dot-prefixed name is syntactically permitted by GitHub's public repo
+  // parser. The provider must still confirm repository existence and visibility.
+  const ui=makeApp({active:false,routePath:'/public/.github'});
+  await ui.boot();
+  const imports=ui.calls.filter(c=>c.url==='/api/my-repos'&&c.opts.method==='POST');
+  assert.equal(imports.length,1);
+  assert.equal(JSON.parse(imports[0].opts.body).url,'public/.github');
+  assert.equal(ui.el('addRepoDialog').open,undefined);
 });
 
 test('the URL becomes /owner/repo after importing a public city',async()=>{
