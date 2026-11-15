@@ -239,6 +239,9 @@ async def import_my_repo(request: Request, payload: ImportRequest):
     _profile, uid, _csrf = require_user(request, mutation=True)
     # Parse before debiting a request quota. Never log user-supplied arbitrary URLs.
     owner, repo = parse_repository(payload.url)
+    # Lightweight anti-spam guard for ALL import posts, including cache hits.
+    # 120 attempts in five minutes is far above normal interactive use.
+    _limit(request, f"import-call:{uid}", count=120, window=300)
     began = time.monotonic()
     try:
         key = (owner + '/' + repo).lower()
