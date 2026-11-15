@@ -50,6 +50,11 @@ def _retry_seconds(response: httpx.Response) -> int:
     return 60
 
 
+def _new_client() -> httpx.AsyncClient:
+    return httpx.AsyncClient(timeout=httpx.Timeout(5, connect=3),
+                             follow_redirects=False)
+
+
 async def require_current_public(owner: str, repo: str, *,
                                  client: httpx.AsyncClient | None = None) -> None:
     """Prevent sharing old cached maps if public source visibility is unverified.
@@ -71,8 +76,7 @@ async def require_current_public(owner: str, repo: str, *,
            "/" + quote(safe_repo, safe="") + "/zip/HEAD")
     own_client = client is None
     if own_client:
-        client = httpx.AsyncClient(
-            timeout=httpx.Timeout(5, connect=3), follow_redirects=False)
+        client = _new_client()
     assert client is not None
     try:
         try:
