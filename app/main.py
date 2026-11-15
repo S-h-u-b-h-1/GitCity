@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 import logging
 import os
+import re
 import time
 
 from fastapi import FastAPI, HTTPException, Query, Request, Response
@@ -163,10 +164,19 @@ async def home():
     return FileResponse(APP_ROOT / "static" / "index.html")
 
 
+def _release_info() -> dict:
+    """Only expose the public Git commit identifier, never arbitrary env data."""
+    result={"version":app.version}
+    raw=(os.getenv("RENDER_GIT_COMMIT") or os.getenv("GITCITY_BUILD_SHA") or "").strip()
+    if re.fullmatch(r"[0-9a-fA-F]{40}",raw):
+        result["revision"]=raw[:12].lower()
+    return result
+
+
 @app.get("/api/health")
 async def health():
     """Liveness probe; does not imply the production setup is safe."""
-    return {"ok": True, "product": "GitCity", "version": "0.9.15"}
+    return {"ok":True,"product":"GitCity",**_release_info()}
 
 
 @app.get("/api/ready")
@@ -194,7 +204,7 @@ async def ready():
                 db.execute('SELECT 1').fetchone()
         except Exception:
             return JSONResponse(status_code=503,content={'ready':False})
-    return {'ready':True, 'version':'0.9.11'}
+    return {'ready':True, **_release_info()}
 
 
 _READY_PIXEL_SVG = (

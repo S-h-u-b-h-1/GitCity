@@ -12,6 +12,8 @@
 
 **Public cache visibility guard (November 2026):** Before a previous public snapshot is served to a different browser, GitCity checks that GitHub's codeload archive is still publicly accessible. Fresh source downloads count as recent positive proofs; successful lightweight HEAD checks are reused for up to 90 seconds. A 404 purges the local shared map and refuses the cached response; GitHub provider restrictions, redirects and timeouts fail closed with retry guidance without charging a fresh import. This is a bounded verification window, not instantaneous privacy revocation or an authenticated GitHub entitlement check.
 
+**Traceable backend releases:** `/api/health` and `/api/ready` report the same GitCity version. On Render, they expose a sanitized 12-character public GitHub commit prefix from `RENDER_GIT_COMMIT`. The non-destructive hosted smoke test can check the exact backend revision with `--expected-commit <Render-git-sha>` (which is separate from Vercel's frontend deployment SHA). No secrets are included.
+
 **Reliability gates (November 2026):** The backend Python and frontend Node test suites must pass before release. Lightweight CI has a bounded timeout, scoped permissions, cancellation of superseded runs, and a manual dispatch option. Browser and production behavior remain distinct follow-up gates; automated unit tests cannot certify external GitHub availability.
 
 **Storage rollout and rollback guide:** [docs/PERSISTENCE_ROLLOUT.md](docs/PERSISTENCE_ROLLOUT.md). It covers cost approval, least-privilege schema setup, verification, stale snapshot limitations, and disabling PostgreSQL safely.
