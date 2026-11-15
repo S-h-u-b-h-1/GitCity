@@ -32,7 +32,9 @@ class FakeElement{
   focus(){}
   closest(){return null;}
 }
-function makeApp({authenticated=true,active=true,assistantResult=null,multipleIssues=false,importFailure=null,issueFailure=null,issueFailureMessage=null,browserIssues=null,browserIssueError=null,sourceLeadResult=null,sourceLeadError=null,deepLink='',storedLastRepo=null,storedOfflineCity=null,storageThrows=false}={}){
+function makeApp({authenticated=true,active=true,assistantResult=null,multipleIssues=false,importFailure=null,issueFailure=null,issueFailureMessage=null,browserIssues=null,browserIssueError=null,sourceLeadResult=null,sourceLeadError=null,deepLink='',storedLastRepo=null,storedOfflineCity=null,storageThrows=false,deferSession=false}={}){
+  let releaseSession;
+  const sessionGate=deferSession?new Promise(resolve=>{releaseSession=resolve;}):null;
   const elements=new Map();
   const el=id=>{if(!elements.has(id))elements.set(id,new FakeElement(['importInput','aiQuestion','searchInput','assistantQuestion'].includes(id)?'input':'div'));return elements.get(id);};
   const layers=['structure','dependencies','flows','hotspots'].map(n=>Object.assign(new FakeElement('button'),{dataset:{layer:n}}));
@@ -53,7 +55,7 @@ function makeApp({authenticated=true,active=true,assistantResult=null,multipleIs
   const calls=[];
   async function fetchStub(url,opts={}){
     calls.push({url,opts});let body=null,code=200;
-    if(url==='/api/session')body=session();
+    if(url==='/api/session'){if(sessionGate)await sessionGate;body=session();}
     else if(url==='/api/my-repos/demo')body={id:'demo',graph:GRAPH};
     else if(url==='/api/demo')body={...GRAPH,source:'demo',url:'',owner:'Repoworld Studio',name:'Orbit Commerce',warnings:['Fictional demonstration only.']};
     else if(typeof url==='string'&&url.startsWith('https://api.github.com/repos/')){
@@ -131,8 +133,19 @@ function makeApp({authenticated=true,active=true,assistantResult=null,multipleIs
   vm.runInNewContext(source,sandbox);
   const flush=()=>new Promise(resolve=>setImmediate(resolve));
   async function boot(){document.onload();for(let i=0;i<4;i++)await flush();}
-  return {document,window,el,layers,compassTabs,calls,copied,store,objectUrls,boot,get renderer(){return renderer;}};
+  return {document,window,el,layers,compassTabs,calls,copied,store,objectUrls,boot,releaseSession:()=>releaseSession?.(),get renderer(){return renderer;}};
 }
+
+test('a cold-starting backend keeps the branded loading screen until the session is ready',async()=>{
+  const ui=makeApp({active:false,deferSession:true});
+  await ui.boot();
+  assert.equal(ui.el('loadingView').hidden,false);
+  assert.match(ui.el('loadingHint').textContent,/backend may be waking/);
+  ui.releaseSession();
+  for(let i=0;i<5;i++)await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(ui.el('loadingView').hidden,true);
+  assert.equal(ui.el('emptyState').hidden,false);
+});
 test('new visitors land directly on Add GitHub repository, without signing in',async()=>{
   const ui=makeApp({authenticated:false,active:false});await ui.boot();
   assert.equal(ui.el('workspace').hidden,false);
