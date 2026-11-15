@@ -17,6 +17,7 @@ from app.demo import build_demo
 def reset_visibility_tables(monkeypatch):
     monkeypatch.setattr(proof, "_public_proof_until", {})
     monkeypatch.setattr(proof, "_revoked_until", {})
+    monkeypatch.setattr(proof, "_provider_cooldown_until", {})
 
 
 def public_graph(owner="public", repo="demo"):
@@ -83,6 +84,12 @@ async def test_unverified_provider_status_fails_closed_with_retry(status,seconds
             await proof.require_current_public("public","demo",client=client)
     assert err.value.status==503
     assert err.value.retry_after==seconds
+    # A second user cannot repeatedly hit the provider before Retry-After.
+    async with client:
+        with pytest.raises(github.RepoError) as blocked:
+            await proof.require_current_public("public","demo",client=client)
+    assert blocked.value.status==503
+    assert 1<=blocked.value.retry_after<=seconds
     assert len(calls)==1
     assert "public/demo" not in proof._public_proof_until
 
@@ -116,14 +123,7 @@ async def test_fresh_live_import_and_cache_hit_proof_then_private_transition(mon
     monkeypatch.setattr(archive_import,"get_public_archive_graph",source)
 
     heads=[]
-    client,calls=head_client(200,observations=heads)
-    monkeypatch.setattr(proof,"_new_client",lambda: httpx.AsyncClient(
-        transport=httpx.MockTransport(
-            lambda req: httpx.Response(
-                200 if len(heads)==0 else 404)
-        )
-    ))
-    # HEAD responses are tested below using a deterministic switch.
+    # HEAD responses are tested below using a deterministic status switch.
     status={"code":200}
     def provider(req):
         heads.append((req.method,str(req.url)))
