@@ -20,6 +20,10 @@ logger = logging.getLogger("gitcity.public-cache")
 TTL_SECONDS = 12 * 3600
 MAX_ENTRIES = 128
 MAX_GRAPH_BYTES = 500_000
+# Fast failover: a temporary database outage must not impose one TLS timeout
+# on every public import or consume additional model/source API quota.
+_database_unavailable_until = 0.0
+_BACKOFF_SECONDS = 30
 _QUERY = ("SELECT graph_json,cached_at FROM gitcity_public_city_snapshots "
           "WHERE repo_key=$1 AND cached_at>$2")
 _UPSERT = ("""INSERT INTO gitcity_public_city_snapshots(repo_key,graph_json,cached_at)
@@ -31,6 +35,8 @@ _PRUNE = ("""DELETE FROM gitcity_public_city_snapshots WHERE repo_key NOT IN
 
 
 def _dsn() -> str | None:
+    if time.monotonic() < _database_unavailable_until:
+        return None
     value = os.getenv("GITCITY_PUBLIC_CACHE_DATABASE_URL", "").strip()
     if not value:
         return None
@@ -100,6 +106,8 @@ async def read_public_graph(owner: str, repo: str) -> dict | None:
     except Exception:
         # Do not log provider URL/password or app session details. Provider
         # unavailability cannot break a successful GitHub import.
+        global _database_unavailable_until
+        _database_unavailable_until = time.monotonic() + _BACKOFF_SECONDS
         logger.warning("Optional public-city PostgreSQL cache unavailable (read).")
         return None
     finally:
@@ -137,6 +145,8 @@ async def write_public_graph(owner: str, repo: str, graph: dict) -> bool:
             await conn.execute(_PRUNE, MAX_ENTRIES)
         return True
     except Exception:
+        global _database_unavailable_until
+        _database_unavailable_until = time.monotonic() + _BACKOFF_SECONDS
         logger.warning("Optional public-city PostgreSQL cache unavailable (write).")
         return False
     finally:
