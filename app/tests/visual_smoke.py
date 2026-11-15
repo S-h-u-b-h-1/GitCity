@@ -34,6 +34,7 @@ async def render(mode, width, height):
         html=html.replace('<script defer src="/static/world.js"></script>','').replace('<script defer src="/static/app.js"></script>','')
         html=html.replace('<script defer src="/static/pr-impact.js"></script>','').replace(
                 '<script defer src="/static/pr-review.js"></script>','')
+        html=html.replace('<script defer src="/static/city-vault.js"></script>','')
         await page.set_content(html,wait_until='domcontentloaded')
         css=(BASE/'app/static/styles.css').read_text()
         img=base64.b64encode((BASE/'app/static/city-concept.png').read_bytes()).decode()

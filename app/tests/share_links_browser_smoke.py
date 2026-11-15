@@ -28,6 +28,7 @@ def offline_assets():
                 '<script defer src="/static/investigation-notes.js"></script>',
                 '<script defer src="/static/offline-city.js"></script>',
                 '<script defer src="/static/pr-impact.js"></script>',
+                '<script defer src="/static/city-vault.js"></script>',
                 '<script defer src="/static/pr-review.js"></script>',
                 '<script defer src="/static/app.js"></script>'):
         html = html.replace(tag, '')
