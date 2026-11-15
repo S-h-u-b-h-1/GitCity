@@ -79,7 +79,8 @@ function build(graph,preview){
   return {repository:repo,number:preview.number,changedModules,directImporters,twoHopImporters,
     testCandidates:[...testCandidates.values()],linkedEdges,sourceEdgeCount:seen.size,unmapped,
     partial:Boolean(preview.partial)||Boolean(preview.nextPage)||Boolean(preview.capped)||
-      graph.nodes.length>MAX_NODES||graph.edges?.length>MAX_EDGES,
+      (Array.isArray(graph.nodes)&&graph.nodes.length>MAX_NODES)||
+      (Array.isArray(graph.edges)&&graph.edges.length>MAX_EDGES),
     disclaimer:'Possible review locations inferred from sampled static imports and a partial city map. No runtime impact, defect, or test result is verified.'};
 }
 function formatChecklist(plan){
