@@ -4,6 +4,7 @@ import base64
 import json
 from pathlib import Path
 from playwright.async_api import async_playwright
+from app.tests.browser_runtime import launch_test_browser
 from app.demo import build_demo
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -11,7 +12,7 @@ OUT = ROOT / 'evidence'
 
 async def exercise(width, height):
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True, executable_path='/usr/bin/chromium',args=['--no-sandbox'])
+        browser = await launch_test_browser(p)
         context = await browser.new_context(viewport={'width':width,'height':height}, device_scale_factor=1)
         page = await context.new_page()
         errors=[]
@@ -71,8 +72,7 @@ async def exercise(width, height):
         assert await page.evaluate('window.__TEST_RENDERER.distance < window.__TEST_RENDERER.overviewDistance')
         await page.screenshot(path=str(OUT/f'zoom-detail-{width}.png'))
         await page.locator('#worldCanvas').dblclick(position={'x':rect['width']*.45,'y':rect['height']*.42})
-        await page.wait_for_timeout(120)
-        assert await page.evaluate('Math.abs(window.__TEST_RENDERER.distance-window.__TEST_RENDERER.overviewDistance)<.01')
+        await page.wait_for_function('Math.abs(window.__TEST_RENDERER.distance-window.__TEST_RENDERER.overviewDistance)<.01',timeout=4000)
         assert not await page.evaluate('document.documentElement.scrollWidth > innerWidth')
         assert not errors, errors
         print(f'{width}x{height}: pointer-lock drift=({dx:.3f},{dy:.3f}) px; first step distance={outcome["distance"]:.2f}/{coords["oldDistance"]:.2f}; browser errors={errors}')

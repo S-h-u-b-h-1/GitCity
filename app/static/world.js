@@ -41,6 +41,7 @@
       this.pan={x:0,z:0};this.targetPan={x:0,z:0};this.activeDistrict=null;
       this.width=0;this.height=0;this.pixelRatio=1;this.spin=false;this.traffic=true;
       this.isDragging=false;this.dragDistance=0;this.hitAreas=[];this.issueHitAreas=[];this.time=0;
+      this.pendingCompactSelection=null;
       this.touchPointers=new Map();this.pinchDistance=0;this.pinchHappened=false;
       this.motion=!!window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
       this.tooltip=document.getElementById('sceneTooltip');
@@ -305,7 +306,9 @@
     addEvents(){
       // Restore the unobstructed city overview without adding another visible button.
       this.canvas.addEventListener('dblclick', e => {
-        e.preventDefault();this.resetCamera();this.pan={x:0,z:0};
+        e.preventDefault();
+        if(this.pendingCompactSelection!==null){clearTimeout(this.pendingCompactSelection);this.pendingCompactSelection=null;}
+        this.resetCamera();this.pan={x:0,z:0};
         if(this.tooltip)this.tooltip.hidden=true;
       });
       this.canvas.addEventListener('pointerdown',e=>{
@@ -365,19 +368,29 @@
         if(!afterPinch&&this.isDragging&&this.dragDistance<6){
           const r=this.canvas.getBoundingClientRect(),x=e.clientX-r.left,y=e.clientY-r.top;
           const plaque=this.getDistrictHit(x,y),issue=this.getIssueHit(x,y);
-          // The 26px issue hit target must not steal a visible district label.
-          // The painted 13.5px badge itself still takes precedence.
+          // A badge takes priority only when the click is over its visible circle.
           const onIssueBadge=issue&&Math.hypot(issue.x-x,issue.y-y)<=14.5;
-          if(plaque&&!onIssueBadge){
-            if(this.tooltip)this.tooltip.hidden=true;
-            this.focusDistrict(plaque.kind);this.onDistrictSelect(plaque.kind);
-          }else if(issue){
-            if(this.tooltip)this.tooltip.hidden=true;
-            this.setSelected(issue.nodeId,{focus:false});this.onIssueSelect(issue.nodeId);
-          }else{
-            const hit=this.getHit(x,y);
-            if(hit){this.setSelected(hit.id,{focus:false});this.onSelect(hit.id);}
-          }
+          const hit=this.getHit(x,y);
+          const select=()=>{
+            if(plaque&&!onIssueBadge){
+              if(this.tooltip)this.tooltip.hidden=true;
+              this.focusDistrict(plaque.kind);this.onDistrictSelect(plaque.kind);
+            }else if(issue){
+              if(this.tooltip)this.tooltip.hidden=true;
+              this.setSelected(issue.nodeId,{focus:false});this.onIssueSelect(issue.nodeId);
+            }else if(hit){
+              this.setSelected(hit.id,{focus:false});this.onSelect(hit.id);
+            }
+          };
+          // On compact screens the inspector can cover the second click before
+          // the canvas sees dblclick. Delay only selections that open a panel,
+          // and cancel them if a double-click requests the city overview.
+          if(this.width<650&&((issue&&(!plaque||onIssueBadge))||(!plaque&&hit))){
+            if(this.pendingCompactSelection!==null)clearTimeout(this.pendingCompactSelection);
+            this.pendingCompactSelection=setTimeout(()=>{
+              this.pendingCompactSelection=null;select();
+            },300);
+          }else select();
         }
         this.isDragging=false;
       });
@@ -873,7 +886,10 @@
       this.drawBuildingLabels(ctx,this.hitAreas);this.drawIssuePins(ctx,this.hitAreas);this.drawDistrictLabels(ctx);
       this.frame=requestAnimationFrame(t=>this.render(t));
     }
-    destroy(){cancelAnimationFrame(this.frame);this.resizeObserver.disconnect();}
+    destroy(){
+      if(this.pendingCompactSelection!==null)clearTimeout(this.pendingCompactSelection);
+      cancelAnimationFrame(this.frame);this.resizeObserver.disconnect();
+    }
   }
   window.RepoWorldRenderer=RepoWorldRenderer;
   window.REPOWORLD_COLORS=COLORS;

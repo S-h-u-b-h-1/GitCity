@@ -7,6 +7,7 @@ import base64
 import json
 from pathlib import Path
 from playwright.async_api import async_playwright
+from app.tests.browser_runtime import launch_test_browser
 from app.demo import build_demo
 
 ROOT=Path(__file__).resolve().parents[2]
@@ -41,7 +42,7 @@ async def verify(width,height):
              'repositories':[{'id':'demo','owner':'Orbit','name':'Orbit Commerce','fullName':'Orbit/commerce'}],
              'activeRepo':'demo','aiConfigured':True}
     async with async_playwright() as pw:
-        browser=await pw.chromium.launch(headless=True,executable_path='/usr/bin/chromium',args=['--no-sandbox'])
+        browser=await launch_test_browser(pw)
         page=await browser.new_page(viewport={'width':width,'height':height},device_scale_factor=1)
         errors=[];page.on('pageerror',lambda error:errors.append(str(error)))
         await page.set_content(html)

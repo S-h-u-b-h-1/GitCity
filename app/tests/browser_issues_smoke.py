@@ -11,6 +11,7 @@ import sys
 ROOT=Path(__file__).resolve().parents[2]
 sys.path.insert(0,str(ROOT))
 from playwright.async_api import async_playwright
+from app.tests.browser_runtime import launch_test_browser
 from app.demo import build_demo
 
 OUT=ROOT/'evidence'/'browser-qa'
@@ -102,7 +103,7 @@ async def main():
                   'url':'https://github.com/pallets/flask','branch':'HEAD'})
     OUT.mkdir(exist_ok=True)
     async with async_playwright() as pw:
-        browser=await pw.chromium.launch(channel='chrome',headless=True,args=['--no-sandbox'])
+        browser=await launch_test_browser(pw)
         for w,h in [(1440,900),(390,844)]:
             page=await browser.new_page(viewport={'width':w,'height':h})
             await check(page,graph)
