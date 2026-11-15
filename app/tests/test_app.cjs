@@ -35,7 +35,7 @@ class FakeElement{
   focus(){}
   closest(){return null;}
 }
-function makeApp({authenticated=true,active=true,assistantResult=null,multipleIssues=false,importFailure=null,issueFailure=null,issueFailureMessage=null,browserIssues=null,browserIssueError=null,sourceLeadResult=null,sourceLeadError=null,deepLink='',routePath='/',storedLastRepo=null,storedOfflineCity=null,storedVault=null,storedVaultEnabled=null,sessionFailure=false,storageThrows=false,deferSession=false,deferImport=false,prFiles=null,prFailure=null,prPages=null}={}){
+function makeApp({authenticated=true,active=true,assistantResult=null,multipleIssues=false,importFailure=null,issueFailure=null,issueFailureMessage=null,browserIssues=null,browserIssueError=null,sourceLeadResult=null,sourceLeadError=null,deepLink='',routePath='/',storedLastRepo=null,storedOfflineCity=null,storedVault=null,storedVaultEnabled=null,sessionFailure=false,confirmResult=true,storageThrows=false,deferSession=false,deferImport=false,prFiles=null,prFailure=null,prPages=null}={}){
   let releaseSession;
   const sessionGate=deferSession?new Promise(resolve=>{releaseSession=resolve;}):null;
   let releaseImport;
@@ -149,7 +149,7 @@ function makeApp({authenticated=true,active=true,assistantResult=null,multipleIs
   const objectUrls=[];
   const window={RepoWorldRenderer:Renderer,REPOWORLD_COLORS:{frontend:'#88ccff'},REPOWORLD_DISTRICTS:{frontend:{name:'Frontend Boulevard'},api:{name:'API Heights'}},
     URL:{createObjectURL(){const uri='blob:repoworld-qa';objectUrls.push(uri);return uri;},revokeObjectURL(){}},
-    confirm(){return true;},
+    confirm(){return confirmResult;},
     setTimeout(){return 1;},clearTimeout(){},location,history,localStorage,navigator:{clipboard:{async writeText(value){copied.push(value);}}}};
   const sandbox={document,window,fetch:fetchStub,console,location,URLSearchParams,URL,Blob,
     clearTimeout(){},setTimeout(fn){fn();return 1;},encodeURIComponent,Response};
@@ -1210,4 +1210,20 @@ test('pausing recovery leaves saved data, clearing maps never destroys manual ba
  assert.equal(user.store.has('gitcity:public-recovery-vault:v1'),false);
  assert.equal(user.store.get('repoworld:offline-city:v1'),manual);
  assert.equal(user.store.has('gitcity:public-recovery-opt-in:v1'),false);
+});
+
+
+test('explicit browser recovery button works even when native confirm popups are dismissed',async()=>{
+ const ui=makeApp({active:true,confirmResult:false});
+ await ui.boot();
+ assert.equal(ui.window.GitCityRecoveryVault.enabled(ui.window.localStorage),false);
+ ui.el('vaultToggle').listeners.click();
+ assert.equal(ui.window.GitCityRecoveryVault.enabled(ui.window.localStorage),true,
+   'Clicking Enable must not depend on a browser native confirm popup');
+ assert.equal(ui.el('vaultEmptyCities').children.length,1);
+ assert.match(ui.el('vaultToggleLabel').textContent,/Pause automatic/);
+ // Destructive vault clear remains protected by confirmation.
+ const copy=ui.store.get('gitcity:public-recovery-vault:v1');
+ ui.el('vaultClear').listeners.click();
+ assert.equal(ui.store.get('gitcity:public-recovery-vault:v1'),copy);
 });

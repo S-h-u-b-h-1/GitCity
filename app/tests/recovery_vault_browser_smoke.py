@@ -63,7 +63,8 @@ async def exercise(browser,width,height):
     try:
         live=await ctx.new_page()
         live.on("pageerror",lambda error:errors.append(str(error)))
-        live.on("dialog",lambda dialog:asyncio.create_task(dialog.accept()))
+        dialogs=[]
+        live.on("dialog",lambda dialog:dialogs.append(dialog.message))
         await serve(live,graph)
         await live.locator("#canvasStage").wait_for(state="visible",timeout=12000)
         assert await live.evaluate(
@@ -78,6 +79,7 @@ async def exercise(browser,width,height):
         assert "test-secret-csrf" not in saved
         assert "token_hash" not in saved
         assert await live.locator("#vaultMenuCities .vault-city-button").count()==1
+        assert not dialogs,"Opt-in must work without native confirmation popups"
         await live.close()
 
         # Simulate a cold backend with missing temporary SQLite and no session.

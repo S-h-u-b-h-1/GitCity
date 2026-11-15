@@ -139,7 +139,8 @@
     const active=!!utility?.enabled(window.localStorage);
     setText('vaultToggleLabel',active?'Pause automatic public-city backups':
       'Enable public-city recovery');
-    setText('vaultMenuStatus',(active?'Recovery enabled. ':'Recovery paused. ')+
+    setText('vaultMenuStatus',(active?'Recovery enabled. ':
+      'Recovery paused. Enable to save this and future public cities. ')+
       items.length+' of '+(utility?.maxCities||8)+' public cities saved locally. '+
       'No login, tokens, AI answers or cloud sync.');
     $('vaultClear').hidden=!items.length;
@@ -152,11 +153,9 @@
     const utility=window.GitCityRecoveryVault;
     if(!utility)return toast('Browser recovery is unavailable.',true);
     const active=utility.enabled(window.localStorage);
-    if(!active&&typeof window.confirm==='function'&&!window.confirm(
-      'Enable automatic browser-only backups of public repository city maps? '+
-      'Up to 8 sanitized maps are saved on this device. No private repo data, '+
-      'cookies or AI answers are stored. Clearing browser storage deletes them.'))
-      return;
+    // Clicking the explicitly labeled Enable button is the opt-in action.
+    // Native confirm() dialogs can be silently dismissed by browsers,
+    // resulting in a button that looks broken on mobile or automation.
     try{
       utility.setEnabled(window.localStorage,!active);
       if(!active&&state.graph?.source==='github'&&!state.offline){
