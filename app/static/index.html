@@ -12,6 +12,7 @@
   <script defer src="/static/browser-radar.js"></script>
   <script defer src="/static/investigation-notes.js"></script>
   <script defer src="/static/offline-city.js"></script>
+  <script defer src="/static/city-vault.js"></script>
   <script defer src="/static/pr-impact.js"></script>
   <script defer src="/static/pr-review.js"></script>
   <script defer src="/static/app.js"></script>
@@ -49,6 +50,12 @@
             <button type="button" class="popover-command" id="restoreOfflineCity"><span>↑</span> Restore city from file</button>
             <button type="button" class="popover-command" id="clearOfflineCity" hidden><span>×</span> Clear browser city backup</button>
             <button type="button" class="popover-command" id="addAnotherRepo"><span>＋</span> Add GitHub repository</button>
+            <div class="popover-divider"></div>
+            <div class="popover-heading">BROWSER RECOVERY · OPTIONAL</div>
+            <button type="button" class="popover-command" id="vaultToggle"><span>▣</span><span id="vaultToggleLabel">Enable public-city recovery</span></button>
+            <p id="vaultMenuStatus" class="vault-menu-status">Opt in to save sanitized public city maps in this browser. No account or cloud sync.</p>
+            <div id="vaultMenuCities" class="repo-menu-items vault-menu-cities" hidden></div>
+            <button type="button" class="popover-command danger" id="vaultClear" hidden><span>×</span> Clear saved recovery maps</button>
           </div>
         </div>
       </div>
@@ -68,6 +75,11 @@
       <p class="recent-repo-help" id="offlineRepoHelp" hidden>Opt-in browser backup: view stored public buildings and paths without live GitHub, Issue Radar or AI. Re-import to reconnect.</p>
       <button type="button" class="recent-repo-action" id="restoreOfflineCityEmpty">Restore city from a file <span aria-hidden="true">↗</span></button>
       <p class="recent-repo-help">Portable backups are browser-only public maps. Files are not uploaded to GitCity.</p>
+      <section id="vaultRecovery" class="vault-recovery" aria-label="Public city recovery maps" hidden>
+        <h2>Recover a public city saved in this browser</h2>
+        <p>These are older, browser-only maps. Open offline without GitHub calls, or explicitly re-import to reconnect live tools.</p>
+        <div id="vaultEmptyCities" class="vault-recovery-list"></div>
+      </section>
       <div class="empty-assurance">NO ACCOUNT REQUIRED <span>·</span> PUBLIC REPOSITORIES ONLY <span>·</span> READ-ONLY IMPORT</div>
     </section>
 

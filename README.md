@@ -77,6 +77,16 @@ The original near-black, floating-district perspective remains. Decorative block
 
 Within **Explore code → Open issues**, search the fetched issue sample by title, issue number or labels, or filter by bug, good-first-issue, enhancement, or location-hint categories. Filtering happens entirely in the browser with no extra GitHub requests. It does not search every issue in the repository, promote unverified paths to source observations, or change the map markers.
 
+## Opt-in public-city recovery vault (browser only)
+
+Render Free can reset its temporary SQLite guest sessions and stored city lists on restart. GitCity now offers an **explicitly opt-in, same-browser recovery vault**: open the repository menu and choose **Enable public-city recovery**. GitCity immediately captures the current verified public GitHub city (if available) and automatically saves future live public city maps **only after opt-in**. This is distinct from the older one-off manual offline backup.
+
+The vault stores a bounded **8 most-recent public maps**, with a 750,000-character per-map limit and a 3,000,000-character combined cap. Older snapshots are removed when the cap is reached. The existing public-city sanitizer strips guest IDs, cookies, CSRF tokens, source bodies, model answers, issues, and unrecognized fields. Invalid maps, unsafe URLs or file paths, oversized data and blocked/full local storage are rejected. Storage updates are atomic at the browser key level: a failed write leaves the previous known-good vault unchanged.
+
+When the backend resets or is unavailable, the welcome screen shows **Recover a public city saved in this browser**; click a map to explore the saved buildings and sampled imports **offline, without GitHub fetches or quota use**. Select **Re-import to restore live tools** only when you want a fresh import through the normal confirmation and quota rules. Pausing backups preserves existing snapshots; **Clear saved recovery maps** explicitly deletes them.
+
+These snapshots can be stale or remain in this browser after a GitHub repository changes visibility. They are not entitlement proofs, cross-device sync, persistent server sessions, cloud accounts, recovery of AI conversations, or an automatic bypass of import limits. Site data deletion, private browsing or changing devices can erase the vault. **No new billing or database was added.**
+
 ## Portable offline city files (v0.9.15)
 
 To move a public city map between browsers without relying on Render's temporary SQLite storage, first **Save city for offline viewing** in the existing repository menu. Then choose **Download portable city file** to save a `repoworld-owner-repo.json` backup to your device. On another browser/device, choose **Restore city from file** in the repository menu or the empty welcome screen. Restoring validates a versioned file format and the same strict public-GitHub URL, path, edge and module bounds as the existing local backup, then saves *one* sanitized map in the new browser's local storage and opens it as an explicitly **offline preview**.

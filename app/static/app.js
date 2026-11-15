@@ -106,6 +106,86 @@
   function startImport(){closePopovers();setText('importError','');$('importError').hidden=true;$('importDemo').hidden=true;$('importInput').value='';
     $('addRepoDialog').showModal();setTimeout(()=>$('importInput').focus(),50);}
   function hideImport(){if(!state.busy)$('addRepoDialog').close();}
+  function recoverableCities(){
+    try{return window.GitCityRecoveryVault?.list(window.localStorage)||[];}catch{return [];}
+  }
+  async function openRecoveredCity(repo){
+    const utility=window.GitCityRecoveryVault;
+    const stored=utility?.open(window.localStorage,repo);
+    if(!stored){toast('This public city backup is no longer available in this browser.',true);
+      renderVaultControls();return;}
+    closePopovers();state.activeId=null;
+    await useGraph(stored.graph,{offline:true});
+    toast('Opened a locally saved public city. Re-import explicitly to reconnect live tools.');
+  }
+  function appendRecoveredButtons(container,entries){
+    container.replaceChildren();
+    for(const entry of entries){
+      const button=document.createElement('button');button.type='button';
+      button.className='vault-city-button';
+      const text=document.createElement('span');text.style.minWidth='0';
+      const name=document.createElement('strong');name.textContent=entry.repo;
+      const hint=document.createElement('small');
+      hint.textContent=entry.moduleCount+' indexed building'+(entry.moduleCount===1?'':'s')+' · saved in this browser';
+      const action=document.createElement('span');action.textContent='Open offline ↗';
+      text.append(name,hint);button.append(text,action);
+      button.addEventListener('click',()=>openRecoveredCity(entry.repo));
+      container.append(button);
+    }
+  }
+  function renderVaultControls(){
+    const utility=window.GitCityRecoveryVault;
+    const items=recoverableCities();
+    const active=!!utility?.enabled(window.localStorage);
+    setText('vaultToggleLabel',active?'Pause automatic public-city backups':
+      'Enable public-city recovery');
+    setText('vaultMenuStatus',(active?'Recovery enabled. ':'Recovery paused. ')+
+      items.length+' of '+(utility?.maxCities||8)+' public cities saved locally. '+
+      'No login, tokens, AI answers or cloud sync.');
+    $('vaultClear').hidden=!items.length;
+    $('vaultMenuCities').hidden=!items.length;
+    appendRecoveredButtons($('vaultMenuCities'),items);
+    $('vaultRecovery').hidden=!items.length;
+    appendRecoveredButtons($('vaultEmptyCities'),items);
+  }
+  function toggleVault(){
+    const utility=window.GitCityRecoveryVault;
+    if(!utility)return toast('Browser recovery is unavailable.',true);
+    const active=utility.enabled(window.localStorage);
+    if(!active&&typeof window.confirm==='function'&&!window.confirm(
+      'Enable automatic browser-only backups of public repository city maps? '+
+      'Up to 8 sanitized maps are saved on this device. No private repo data, '+
+      'cookies or AI answers are stored. Clearing browser storage deletes them.'))
+      return;
+    try{
+      utility.setEnabled(window.localStorage,!active);
+      if(!active&&state.graph?.source==='github'&&!state.offline){
+        try{utility.capture(state.graph,window.localStorage);}
+        catch(error){toast('Enabled recovery, but this city could not be saved: '+error.message,true);}
+      }
+      closePopovers();renderVaultControls();
+      toast(active?'Automatic public-city recovery paused. Saved maps remain available.':
+        'Public-city recovery enabled for this browser. Future live cities will be saved.');
+    }catch(error){toast(error.message||'Could not update browser recovery settings.',true);}
+  }
+  function clearVault(){
+    const utility=window.GitCityRecoveryVault;
+    if(!utility)return;
+    if(typeof window.confirm==='function'&&!window.confirm(
+      'Delete all public city recovery maps saved on this device? This does not affect server workspaces.'))
+      return;
+    if(!utility.clear(window.localStorage)){
+      toast('Browser storage is blocked; recovery maps could not be cleared.',true);return;
+    }
+    closePopovers();renderVaultControls();
+    toast('Saved public-city recovery maps cleared from this browser.');
+  }
+  function captureVaultOnLiveCity(graph){
+    const utility=window.GitCityRecoveryVault;
+    if(!utility?.enabled(window.localStorage))return;
+    try{utility.capture(graph,window.localStorage);}
+    catch(error){toast('Browser recovery could not save this public city: '+error.message,true);}
+  }
   function readOfflineBackup(){
     try{return window.RepoWorldOfflineCity?.read(window.localStorage)||null;}catch{return null;}
   }
@@ -210,6 +290,7 @@
     const backup=readOfflineBackup();
     $('openOfflineCity').hidden=!backup;$('offlineRepoHelp').hidden=!backup;
     setText('offlineRepoName',backup?backup.graph.url.replace('https://github.com/',''):'');
+    renderVaultControls();
   }
   function showCity(){
     $('workspace').classList.remove('is-empty');$('emptyState').hidden=true;$('canvasStage').hidden=false;
@@ -225,6 +306,7 @@
     $('reconnectOfflineCity').hidden=!state.offline;
     $('refreshCurrentRepo').hidden=state.offline||!(state.graph?.source==='github');
     $('copyCityLink').hidden=!(state.graph?.source==='github');
+    renderVaultControls();
     if(!state.repos.length){const p=document.createElement('p');p.className='empty-small';p.textContent='No repositories added yet.';p.style.padding='0 10px';list.append(p);return;}
     for(const repo of state.repos){
       const row=document.createElement('button');row.type='button';row.className='repo-menu-item'+(repo.id===state.activeId?' active':'');
@@ -273,6 +355,7 @@
     setText('cityStatusCounts',`${new Set(graph.nodes.map(n=>n.kind)).size} DISTRICTS  ·  ${graph.nodes.length} BUILDINGS`);
     document.title=`${graph.name} — GitCity`;
     syncRepositoryPath(graph);
+    if(!state.offline&&graph.source==='github')captureVaultOnLiveCity(graph);
     setLayer('structure');renderRepos();state.renderer.setIssueMarkers?.({});
     if(state.offline){
       state.radarError='Offline map preview; live GitHub issues require re-import.';
@@ -1385,6 +1468,8 @@
     $('restoreOfflineCity').addEventListener('click',choosePortableCityFile);
     $('restoreOfflineCityEmpty').addEventListener('click',choosePortableCityFile);
     $('offlineCityFile').addEventListener('change',restorePortableCityFile);
+    $('vaultToggle').addEventListener('click',toggleVault);
+    $('vaultClear').addEventListener('click',clearVault);
     $('refreshCurrentRepo').addEventListener('click',refreshCodeIndex);
     $('copyCityLink').addEventListener('click',copyCityLink);
     $('closeImport').addEventListener('click',hideImport);
