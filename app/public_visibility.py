@@ -11,8 +11,7 @@ shared-cache reads; fresh imports still use the existing GitHub source route.
 """
 from __future__ import annotations
 
-import asyncio
-import logging
+import math
 import time
 from urllib.parse import quote
 
@@ -20,13 +19,13 @@ import httpx
 
 from .github import RepoError, parse_repository
 
-logger = logging.getLogger("gitcity.cache-visibility")
 PUBLIC_PROOF_TTL_SECONDS = 90
 REVOKED_RECHECK_SECONDS = 90
 MAX_PROOFS = 512
 
 _public_proof_until: dict[str, float] = {}
 _revoked_until: dict[str, float] = {}
+_provider_cooldown_until: dict[str, float] = {}
 
 
 def _remember(target: dict[str, float], key: str, expiry: float) -> None:
@@ -40,6 +39,7 @@ def mark_fresh_public(owner: str, repo: str) -> None:
     """Only call after a successfully fetched public source archive or API."""
     key = (owner + "/" + repo).lower()
     _revoked_until.pop(key, None)
+    _provider_cooldown_until.pop(key, None)
     _remember(_public_proof_until, key, time.monotonic() + PUBLIC_PROOF_TTL_SECONDS)
 
 
@@ -71,6 +71,11 @@ async def require_current_public(owner: str, repo: str, *,
             "This repository is no longer publicly accessible. Its cached city is unavailable.", 404)
     if _public_proof_until.get(key, 0) > now:
         return
+    cooldown = _provider_cooldown_until.get(key, 0)
+    if cooldown > now:
+        raise RepoError("GitHub public-visibility verification is cooling down. Retry shortly.",
+                        503, retry_after=max(1, math.ceil(cooldown-now)))
+    _provider_cooldown_until.pop(key, None)
 
     url = ("https://codeload.github.com/" + quote(safe_owner, safe="") +
            "/" + quote(safe_repo, safe="") + "/zip/HEAD")
@@ -87,6 +92,7 @@ async def require_current_public(owner: str, repo: str, *,
                 timeout=httpx.Timeout(5, connect=3),
             )
         except (httpx.TimeoutException, httpx.RequestError) as exc:
+            _remember(_provider_cooldown_until, key, time.monotonic() + 15)
             raise RepoError(
                 "Cannot verify that this cached repository is still public. Retry shortly.",
                 503, retry_after=15) from exc
@@ -101,16 +107,20 @@ async def require_current_public(owner: str, repo: str, *,
             from .github import invalidate_shared_graph
             invalidate_shared_graph(safe_owner, safe_repo)
             _public_proof_until.pop(key, None)
+            _provider_cooldown_until.pop(key, None)
             _remember(_revoked_until, key, time.monotonic() + REVOKED_RECHECK_SECONDS)
             raise RepoError(
                 "This repository is no longer publicly accessible. Its cached city is unavailable.", 404)
 
         if response.status_code in (403, 429):
+            seconds = _retry_seconds(response)
+            _remember(_provider_cooldown_until, key, time.monotonic() + seconds)
             raise RepoError(
                 "GitHub is limiting public-visibility checks. Cached city is temporarily unavailable.",
-                503, retry_after=_retry_seconds(response))
+                503, retry_after=seconds)
         # Redirects must not silently grant trust for a different canonical
         # owner/repo, nor should provider errors expose old cached source paths.
+        _remember(_provider_cooldown_until, key, time.monotonic() + 15)
         raise RepoError(
             "Cannot confirm public access to this cached city. Retry shortly.",
             503, retry_after=15)
