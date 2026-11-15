@@ -260,6 +260,13 @@ async def import_my_repo(request: Request, payload: ImportRequest):
                 graph = cached_public_graph(owner, repo)
                 cached = graph is not None
                 if not cached:
+                    from .public_snapshot_pg import read_public_graph
+                    graph = await read_public_graph(owner, repo)
+                    if graph is not None:
+                        from .github import _remember_public_graph
+                        _remember_public_graph(key, graph)
+                    cached = graph is not None
+                if not cached:
                     async with _expensive_import_slot():
                         _limit(request, f"import:{uid}", count=30)
                         reserve_import(uid, request.client.host if request.client else "unknown")

@@ -324,6 +324,12 @@ async def get_repository_graph(raw: str, client: httpx.AsyncClient | None = None
     owner, repo = parse_repository(raw)
     cache_key = (owner + "/" + repo).lower()
     cached = cached_public_graph(owner, repo) if client is None and not refresh else None
+    if cached is None and client is None and not refresh:
+        # Optional durable public-only cache after local RAM/SQLite miss.
+        from .public_snapshot_pg import read_public_graph
+        cached = await read_public_graph(owner, repo)
+        if cached is not None:
+            _remember_public_graph(cache_key, cached)
     token = os.environ.get("GITHUB_TOKEN", "").strip()
     if not token and os.getenv("REPOWORLD_EPHEMERAL_DEMO") == "1":
         # Explicit free public preview: use the bounded source ZIP endpoint,
@@ -335,6 +341,8 @@ async def get_repository_graph(raw: str, client: httpx.AsyncClient | None = None
         graph = await get_public_archive_graph(owner, repo, client=client)
         if client is None:
             _cache_public_graph(owner, repo, graph)
+            from .public_snapshot_pg import write_public_graph
+            await write_public_graph(owner, repo, graph)
         return graph
     headers = {"Accept": "application/vnd.github+json", "User-Agent": "RepoWorld/0.9.7",
                "X-GitHub-Api-Version": "2022-11-28"}
@@ -386,6 +394,8 @@ async def get_repository_graph(raw: str, client: httpx.AsyncClient | None = None
             )
         if own_client:
             _cache_public_graph(owner, repo, graph)
+            from .public_snapshot_pg import write_public_graph
+            await write_public_graph(owner, repo, graph)
         return graph
     finally:
         if own_client:
