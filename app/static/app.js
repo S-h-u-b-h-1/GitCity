@@ -6,7 +6,8 @@
   const state={session:null,repos:[],activeId:null,graph:null,renderer:null,tour:null,tourIndex:-1,
     chosen:null,layer:'structure',busy:false,offline:false,toast:null,impact:null,searchTimer:null,searchRevision:0,lastFindResults:[],
     radar:null,radarError:null,radarRevision:0,compassTab:'ask',chatHistory:[],chatBusy:false,assistantNode:null,assistantIssue:null,
-    issueOpenNode:null,issueSelectedNumber:null,issueNotesResult:null,issueInsightCache:new Map(),issueInsightRevision:0};
+    issueOpenNode:null,issueSelectedNumber:null,issueNotesResult:null,issueInsightCache:new Map(),issueInsightRevision:0,
+    prPreview:null,prRevision:0};
   const esc=(s)=>String(s??'');
   const getNode=(id)=>state.graph?.nodes?.find(n=>n.id===id);
   const names={frontend:'Frontend Boulevard',api:'API Heights',service:'Service Quarter',database:'Data Harbor',
@@ -28,9 +29,20 @@
   }
   // GitCity URLs mirror GitHub owner/repo paths. Legacy ?repo= links still work.
   // Paths are validated, never treated as a trigger for a background import.
+  const linkedPullRequest=()=>{
+    try{
+      const pathname=window.location?.pathname||'/';
+      const match=/^\/([A-Za-z0-9-]{1,39})\/([A-Za-z0-9_.-]{1,100})\/pull\/([1-9][0-9]{0,8})\/?$/.exec(pathname);
+      if(!match)return null;
+      const repo=match[1]+'/'+match[2];
+      if(!validPublicRepo(repo))return null;
+      return {repo,number:Number(match[3])};
+    }catch{return null;}
+  };
   const deepLinkedRepo=()=>{
     try{
       const pathname=window.location?.pathname||'/';
+      const pull=linkedPullRequest();if(pull)return pull.repo;
       const pathMatch=/^\/([A-Za-z0-9-]{1,39})\/([A-Za-z0-9_.-]{1,100})\/?$/.exec(pathname);
       if(pathMatch){
         const repo=pathMatch[1]+'/'+pathMatch[2];
@@ -55,6 +67,8 @@
     const repo=publicRepoFromGraph(graph);
     const path=repositoryPath(repo);
     if(!path||!window.history?.replaceState)return;
+    const linkedPR=linkedPullRequest();
+    if(linkedPR&&linkedPR.repo.toLowerCase()===repo.toLowerCase())return;
     const current=window.location;
     if(current?.pathname===path&&!current.search&&!current.hash)return;
     try{window.history.replaceState(null,'',path);}catch{/* A locked-down browser may deny history changes. */}
@@ -182,6 +196,7 @@
     startImport();$('importInput').value=recent;
   }
   function showEmpty(){
+    resetPullPreview();
     state.offline=false;state.graph=null;
     setText('cityStatusText','CITY READY');
     $('workspace').classList.add('is-empty');$('emptyState').hidden=false;$('canvasStage').hidden=true;
@@ -239,6 +254,7 @@
   }
   async function useGraph(graph,{offline=false}={}){
     if(!graph?.nodes?.length){toast('This repository has no displayable modules.',true);showEmpty();return;}
+    resetPullPreview();
     state.offline=Boolean(offline);
     state.graph=graph;state.chosen=null;state.tour=null;state.tourIndex=-1;clearImpact();
     state.chatHistory=[];state.assistantNode=null;state.assistantIssue=null;state.radar=null;state.radarError=null;state.radarRevision++;
@@ -536,6 +552,85 @@
     }catch(e){toast(e.message,true);setText('inspectorTrace','Trace change impact →');}
     finally{button.disabled=false;}
   }
+  function resetPullPreview(){
+    state.prPreview=null;state.prRevision++;
+    state.renderer?.setPullChangedNodes?.([]);
+    $('prResults').replaceChildren();
+    $('prLoad').disabled=false;
+    $('prClear').hidden=true;
+    $('prOpenGithub').hidden=true;
+    $('prStatus').classList.toggle('is-error',false);
+    setText('prStatus','Enter a pull request number or an exact GitHub URL for this repository.');
+    setText('prScope','GitHub file paths only; imported city mappings can be incomplete. No runtime impact or defect is verified.');
+  }
+  function renderPullPreview(result){
+    const container=$('prResults');container.replaceChildren();
+    const changeIds=[...new Set(result.files.filter(row=>row.mapped).map(row=>row.mapped.nodeId))];
+    state.renderer?.setPullChangedNodes?.(changeIds);
+    const repo=result.repository;
+    $('prOpenGithub').href='https://github.com/'+repo+'/pull/'+result.number;
+    $('prOpenGithub').hidden=false;
+    $('prClear').hidden=false;
+    const partial=result.partial?' · FIRST 100 FILES ONLY / PARTIAL':'';
+    setText('prStatus',result.files.length+' GITHUB-REPORTED FILE'+(result.files.length===1?'':'S')+
+      ' · '+result.mapped+' FILE MATCH'+(result.mapped===1?'':'ES')+
+      ' IN CITY · '+result.unmapped+' UNMAPPED'+partial);
+    setText('prScope',result.scope+
+      (result.partial?' GitHub returned a partial first page; more changed files may exist.':''));
+    for(const file of result.files){
+      const target=file.mapped;
+      const row=document.createElement(target?'button':'div');
+      if(target)row.type='button';
+      row.className='pr-file-row';
+      row.dataset.evidence=target?.evidence||'unmapped';
+      const name=document.createElement('strong');name.textContent=file.filename;
+      const status=document.createElement('small');
+      status.textContent=file.status.toUpperCase()+
+        (file.additions===null?'':(' · +'+file.additions))+
+        (file.deletions===null?'':(' / -'+file.deletions));
+      const context=document.createElement('small');
+      context.textContent=target?
+        (target.evidence==='indexed-file'?'Exact indexed file → ':target.evidence==='previous-file'?
+          'Exact previous path → ':'Directory hint only → ')+target.nodeName:
+        'Unmapped to sampled city; no affected module claimed';
+      row.append(name,status,context);
+      if(target)row.addEventListener('click',()=>chooseSearchResult(target.nodeId));
+      container.append(row);
+    }
+    if(!result.files.length){
+      const empty=document.createElement('p');
+      empty.className='empty-small';empty.textContent='GitHub returned no changed files on this PR page.';
+      container.append(empty);
+    }
+  }
+  async function loadPullImpact(input){
+    const tool=window.GitCityPullImpact;
+    if(!tool||!state.graph||state.offline){
+      toast('PR Impact requires a live public GitHub city.',true);return;
+    }
+    resetPullPreview();
+    const number=tool.pullNumberFromInput(state.graph,String(input??''));
+    if(number===null){
+      setText('prStatus','Enter a positive PR number or a GitHub pull request URL for this repository.');
+      $('prStatus').classList.toggle('is-error',true);
+      return;
+    }
+    const rev=++state.prRevision,graph=state.graph;
+    $('prInput').value=String(number);
+    $('prLoad').disabled=true;
+    setText('prStatus','Reading public GitHub changed-file metadata for PR #'+number+'…');
+    try{
+      const result=await tool.load(graph,number);
+      if(rev!==state.prRevision||state.graph!==graph)return;
+      state.prPreview=result;renderPullPreview(result);
+    }catch(error){
+      if(rev!==state.prRevision||state.graph!==graph)return;
+      $('prStatus').classList.toggle('is-error',true);
+      setText('prStatus','Could not inspect PR #'+number+': '+error.message);
+    }finally{
+      if(rev===state.prRevision)$('prLoad').disabled=false;
+    }
+  }
   function openFind(query='',tab='ask'){
     if(!state.graph)return;
     closePopovers();$('mapTools').hidden=true;hideIssueDrawer();
@@ -546,8 +641,8 @@
     if(query&&tab==='find')searchModules(query);
   }
   function setCompassTab(tab){
-    state.compassTab=['ask','issues','find'].includes(tab)?tab:'ask';
-    for(const name of ['ask','issues','find']){
+    state.compassTab=['ask','issues','find','pr'].includes(tab)?tab:'ask';
+    for(const name of ['ask','issues','find','pr']){
       $(name+'Tab').hidden=name!==state.compassTab;
       const button=document.querySelector('[data-compass-tab="'+name+'"]');
       if(button){button.classList.toggle('active',name===state.compassTab);button.setAttribute('aria-pressed',String(name===state.compassTab));}
@@ -555,6 +650,7 @@
     if(state.compassTab==='issues')renderIssueRadar();
     if(state.compassTab==='ask')$('assistantQuestion').focus();
     if(state.compassTab==='find')$('searchInput').focus();
+    if(state.compassTab==='pr')$('prInput').focus();
   }
   function addAssistantWelcome(){
     const start=document.createElement('div');start.className='assistant-start';
@@ -1189,6 +1285,12 @@
     $('zoomIn').addEventListener('click',()=>zoomCity(.8));
     $('tourButton').addEventListener('click',openTour);
     $('findButton').addEventListener('click',()=>openFind('','find'));
+    $('prImpactShortcut').addEventListener('click',()=>openFind('','pr'));
+    $('prLoad').addEventListener('click',()=>loadPullImpact($('prInput').value));
+    $('prClear').addEventListener('click',resetPullPreview);
+    $('prInput').addEventListener('keydown',event=>{
+      if(event.key==='Enter'){event.preventDefault();loadPullImpact($('prInput').value);}
+    });
     $('closeSearch').addEventListener('click',()=>{$('searchDialog').close();state.searchRevision++;clearTimeout(state.searchTimer);});
     $('searchForm').addEventListener('submit',e=>{e.preventDefault();if(state.compassTab==='find'&&state.lastFindResults.length)chooseSearchResult(state.lastFindResults[0].nodeId);});
     document.querySelectorAll('[data-suggestion]').forEach(button=>button.addEventListener('click',()=>{
@@ -1220,6 +1322,7 @@
     try{
       await refreshSession();
       clearTimeout(waking);
+      const requestedPR=linkedPullRequest();
       const requested=deepLinkedRepo();
       // Direct /owner/repo URLs automatically open public cities, while the
       // legacy ?repo= link remains confirmation-only for compatibility.
@@ -1237,6 +1340,12 @@
           startImport();
           $('importInput').value=requested;
         }
+      }
+      if(requestedPR&&state.graph?.source==='github'&&!state.offline&&
+         publicRepoFromGraph(state.graph)?.toLowerCase()===requestedPR.repo.toLowerCase()){
+        openFind('','pr');
+        $('prInput').value=String(requestedPR.number);
+        await loadPullImpact(String(requestedPR.number));
       }
     }catch(e){
       showView();showEmpty();toast('Could not open this browser workspace: '+e.message,true);
