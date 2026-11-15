@@ -16,6 +16,7 @@ function world(options={}) {
   }, {get(t,p){return p in t ? t[p] : function(){};}});
   const tooltip={hidden:true,style:{},replaceChildren(){},append(){}};
   const events={};
+  const timers=new Map();let nextTimer=0;
   const canvas={
     width:0,height:0,style:{},
     getContext(){return context2d;},
@@ -28,11 +29,15 @@ function world(options={}) {
     window, document:{getElementById(){return tooltip;},createElement(){return {textContent:''};}},
     ResizeObserver:class { observe(){} disconnect(){} },
     requestAnimationFrame(){return 1;},cancelAnimationFrame(){},
+    setTimeout(fn){const id=++nextTimer;timers.set(id,fn);return id;},
+    clearTimeout(id){timers.delete(id);},
     performance:{now(){return 1000;}},console,
   };
   vm.runInNewContext(source,sandbox);
   const renderer=new window.RepoWorldRenderer(canvas,options);
-  return {renderer,canvas,events,tooltip};
+  return {renderer,canvas,events,tooltip,runTimers(){
+    const pending=[...timers.values()];timers.clear();pending.forEach(fn=>fn());
+  }};
 }
 
 const graph={nodes:[
@@ -73,6 +78,31 @@ test('camera and selection controls work',()=>{
   assert.ok(renderer.distance<renderer.overviewDistance);
   renderer.resetCamera();assert.equal(renderer.yaw,-.71);
   assert.equal(renderer.targetPan.x,0);
+});
+
+test('compact-screen double click resets before a building inspector can intercept',()=>{
+  const selected=[];
+  const {renderer,events,runTimers}=world({onSelect:id=>selected.push(id)});
+  renderer.setGraph(graph);
+  renderer.width=390;
+  renderer.getDistrictHit=()=>null;renderer.getIssueHit=()=>null;
+  renderer.getHit=()=>({id:'src/web'});
+  const click=()=>{
+    events.pointerdown({pointerId:1,pointerType:'mouse',clientX:100,clientY:200});
+    events.pointerup({pointerId:1,pointerType:'mouse',clientX:100,clientY:200});
+  };
+  click();
+  assert.deepEqual(selected,[],'first compact click should wait for dblclick');
+  assert.notEqual(renderer.pendingCompactSelection,null);
+  events.dblclick({preventDefault(){}});
+  runTimers();
+  assert.deepEqual(selected,[],'cancelled tap must not open the inspector');
+  assert.equal(renderer.pendingCompactSelection,null);
+  assert.equal(renderer.distance,renderer.overviewDistance);
+  click();runTimers();
+  assert.deepEqual(selected,['src/web'],'a standalone tap still selects its module');
+  assert.equal(renderer.pendingCompactSelection,null);
+  renderer.destroy();
 });
 
 test('renderer rejects unknown map modes and unknown module selections',()=>{
