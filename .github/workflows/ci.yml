@@ -1,12 +1,21 @@
-name: RepoWorld CI
+name: GitCity CI
 on:
   push:
+    branches: [main]
   pull_request:
+  workflow_dispatch:
+
+# Cancel superseded checks on the same branch rather than burning runner time.
+concurrency:
+  group: gitcity-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -38,5 +47,5 @@ jobs:
         run: python scripts/check_build_league.py
       - name: Public release archive integrity and secret scan
         run: |
-          git archive --format=zip --prefix=RepoWorld/ HEAD -o /tmp/repoworld-release.zip
-          python scripts/audit_public_release.py /tmp/repoworld-release.zip
+          git archive --format=zip --prefix=GitCity/ HEAD -o /tmp/gitcity-release.zip
+          python scripts/audit_public_release.py /tmp/gitcity-release.zip

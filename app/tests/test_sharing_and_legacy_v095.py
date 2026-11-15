@@ -30,9 +30,9 @@ async def test_guest_api_session_keeps_secret_bearing_tokens_out_of_shareable_ur
         assert response.status_code == 200
         assert response.json()["guest"] is True
         assert response.json()["csrf"]
-        # Sharing requires no server endpoint, no public guest identity and
-        # no automated model/API calls. Query parameters are client hints only.
+        # Legacy query-string hints are client-only. No guest session or CSRF
+        # secret is embedded into a shareable route or HTML response.
         homepage = await client.get("/?repo=openwisp%2Fopenwisp-utils")
         assert homepage.status_code == 200
-        assert "RepoWorld" in homepage.text
+        assert "<title>GitCity" in homepage.text
         assert "repo=" not in homepage.text
