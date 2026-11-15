@@ -49,6 +49,12 @@ class FakeConnection:
         self.closed = True
 
 
+@pytest.fixture(autouse=True)
+def reset_optional_database_cooldown(monkeypatch):
+    # A simulated PostgreSQL outage must not affect another isolated test.
+    monkeypatch.setattr(pg, '_database_unavailable_until', 0.0)
+
+
 def public_graph(owner="public", repo="demo"):
     result = build_demo()
     result.update(owner=owner, name=repo, source="github",
@@ -211,3 +217,21 @@ async def test_real_import_populates_optional_durable_cache_best_effort(monkeypa
     assert result["name"]=="demo"
     assert events==["source","durable-store"]
     github._GRAPH_CACHE.clear()
+
+
+@pytest.mark.asyncio
+async def test_postgres_outage_backoff_avoids_repeated_connect_timeouts(monkeypatch):
+    monkeypatch.setenv('GITCITY_PUBLIC_CACHE_DATABASE_URL',
+                       'postgresql://gitcity:secret@test-postgres.example/gitcity')
+    calls=[]
+    async def down(_dsn):
+        calls.append('connect')
+        raise ConnectionError('Temporary test outage')
+    monkeypatch.setattr(pg,'_connect',down)
+    assert await pg.read_public_graph('public','demo') is None
+    assert len(calls)==1
+    assert not await pg.write_public_graph('public','demo',public_graph())
+    assert len(calls)==1,'Outage should short-circuit a second TLS connection'
+    monkeypatch.setattr(pg,'_database_unavailable_until',time.monotonic()-1)
+    assert await pg.read_public_graph('public','demo') is None
+    assert len(calls)==2,'Connection can retry after the 30s backoff'
