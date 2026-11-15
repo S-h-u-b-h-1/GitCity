@@ -32,9 +32,11 @@ class FakeElement{
   focus(){}
   closest(){return null;}
 }
-function makeApp({authenticated=true,active=true,assistantResult=null,multipleIssues=false,importFailure=null,issueFailure=null,issueFailureMessage=null,browserIssues=null,browserIssueError=null,sourceLeadResult=null,sourceLeadError=null,deepLink='',routePath='/',storedLastRepo=null,storedOfflineCity=null,storageThrows=false,deferSession=false}={}){
+function makeApp({authenticated=true,active=true,assistantResult=null,multipleIssues=false,importFailure=null,issueFailure=null,issueFailureMessage=null,browserIssues=null,browserIssueError=null,sourceLeadResult=null,sourceLeadError=null,deepLink='',routePath='/',storedLastRepo=null,storedOfflineCity=null,storageThrows=false,deferSession=false,deferImport=false}={}){
   let releaseSession;
   const sessionGate=deferSession?new Promise(resolve=>{releaseSession=resolve;}):null;
+  let releaseImport;
+  const importGate=deferImport?new Promise(resolve=>{releaseImport=resolve;}):null;
   const elements=new Map();
   const el=id=>{if(!elements.has(id))elements.set(id,new FakeElement(['importInput','aiQuestion','searchInput','assistantQuestion'].includes(id)?'input':'div'));return elements.get(id);};
   const layers=['structure','dependencies','flows','hotspots'].map(n=>Object.assign(new FakeElement('button'),{dataset:{layer:n}}));
@@ -88,6 +90,7 @@ function makeApp({authenticated=true,active=true,assistantResult=null,multipleIs
       {nodeId:'web',title:'Web district',description:'UI files'},
       {nodeId:'api',title:'API district',description:'Server files'}]};
     else if(url==='/api/my-repos'&&opts.method==='POST'){
+      if(importGate)await importGate;
       if(importFailure){code=importFailure.status;body={error:importFailure.message};}
       else {active=true;body={id:'demo',graph:GRAPH};}
     }
@@ -139,7 +142,7 @@ function makeApp({authenticated=true,active=true,assistantResult=null,multipleIs
   vm.runInNewContext(source,sandbox);
   const flush=()=>new Promise(resolve=>setImmediate(resolve));
   async function boot(){document.onload();for(let i=0;i<4;i++)await flush();}
-  return {document,window,location,historyUpdates,el,layers,compassTabs,calls,copied,store,objectUrls,boot,releaseSession:()=>releaseSession?.(),get renderer(){return renderer;}};
+  return {document,window,location,historyUpdates,el,layers,compassTabs,calls,copied,store,objectUrls,boot,releaseSession:()=>releaseSession?.(),releaseImport:()=>releaseImport?.(),get renderer(){return renderer;}};
 }
 
 test('a cold-starting backend keeps the branded loading screen until the session is ready',async()=>{
@@ -510,12 +513,43 @@ test('invalid or external deep links never start a repository fetch or import mo
 });
 
 
-test('repository paths prefill an import for a new visitor without network imports',async()=>{
+test('direct repository path opens its city without a create confirmation',async()=>{
   const ui=makeApp({active:false,routePath:'/S-h-u-b-h-1/GitCity'});await ui.boot();
+  assert.equal(ui.el('addRepoDialog').open,undefined);
+  assert.equal(ui.el('loadingView').hidden,true);
+  assert.equal(ui.el('canvasStage').hidden,false);
+  assert.equal(ui.el('activeRepoTitle').textContent,'Demo City');
+  const imports=ui.calls.filter(c=>c.url==='/api/my-repos'&&c.opts.method==='POST');
+  assert.equal(imports.length,1);
+  assert.equal(JSON.parse(imports[0].opts.body).url,'S-h-u-b-h-1/GitCity');
+  assert.equal(imports[0].opts.headers['X-RepoWorld-CSRF'],'csrf-test');
+});
+
+test('direct links keep GitCity loading until the public import finishes',async()=>{
+  const ui=makeApp({active:false,routePath:'/testowner/demo-city',deferImport:true});
+  await ui.boot();
+  assert.equal(ui.el('loadingView').hidden,false);
+  assert.equal(ui.el('canvasStage').hidden,true);
+  assert.match(ui.el('loadingHint').textContent,/GitHub sources/);
+  assert.equal(ui.calls.filter(c=>c.url==='/api/my-repos'&&c.opts.method==='POST').length,1);
+  ui.releaseImport();
+  for(let i=0;i<7;i++)await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(ui.el('loadingView').hidden,true);
+  assert.equal(ui.el('canvasStage').hidden,false);
+  assert.equal(ui.location.pathname,'/testowner/demo-city');
+});
+
+test('automatic import fails into a prefilled retry dialog without looping',async()=>{
+  const ui=makeApp({active:false,routePath:'/testowner/demo-city',
+    importFailure:{status:429,message:'Public import quota reached.',retryAfter:'91'}});
+  await ui.boot();
+  assert.equal(ui.el('loadingView').hidden,true);
   assert.equal(ui.el('addRepoDialog').open,true);
-  assert.equal(ui.el('importInput').value,'S-h-u-b-h-1/GitCity');
-  assert.equal(ui.location.pathname,'/S-h-u-b-h-1/GitCity');
-  assert.equal(ui.calls.filter(c=>c.url==='/api/my-repos'&&c.opts.method==='POST').length,0);
+  assert.equal(ui.el('importInput').value,'testowner/demo-city');
+  assert.match(ui.el('importError').textContent,/Could not open this repository automatically/);
+  assert.match(ui.el('importError').textContent,/Public import quota reached/);
+  assert.equal(ui.el('importError').hidden,false);
+  assert.equal(ui.calls.filter(c=>c.url==='/api/my-repos'&&c.opts.method==='POST').length,1);
 });
 
 test('repository paths open existing public cities case-insensitively and canonicalize the URL',async()=>{

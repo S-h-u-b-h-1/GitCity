@@ -2,7 +2,7 @@
 
 **Formerly RepoWorld.** The existing application, commit history, public city file format, and BharatCode submission provenance are preserved.
 
-**Shareable GitCity URLs:** [S-h-u-b-h-1/GitCity](https://gitcity-one.vercel.app/S-h-u-b-h-1/GitCity) · [facebook/react](https://gitcity-one.vercel.app/facebook/react). The interface accepts `/owner/repo`, opens an existing saved city or asks a new visitor to confirm import, and supports legacy `?repo=owner%2Frepo` links. It never auto-imports from a shared link.
+**Shareable GitCity URLs:** [S-h-u-b-h-1/GitCity](https://gitcity-one.vercel.app/S-h-u-b-h-1/GitCity) · [facebook/react](https://gitcity-one.vercel.app/facebook/react). The interface accepts `/owner/repo`, opens a previously saved city immediately or automatically imports the requested **public** GitHub repository for a new browser, and displays the city without confirmation. Automatic imports are subject to the existing abuse-prevention quotas; on an import error, GitCity offers a prefilled manual retry. Legacy `?repo=owner%2Frepo` links retain their confirmation-only behavior.
 
 **Requested domain:** `gitcity.vercel.app` is currently assigned to a different Vercel team (Vercel `409 owned-on-other-team`). The production hostname remains `gitcity-one.vercel.app` until domain ownership is released or transferred.
 

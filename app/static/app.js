@@ -304,6 +304,35 @@
     }
     finally{clearTimeout(progressTimer);state.busy=false;$('importButton').disabled=false;$('importButton').textContent='Create my city ↗';}
   }
+  // Canonical /owner/repo links open the public city on first visit. Import
+  // quotas and all server-side GitHub validation still apply; each page load
+  // attempts at most one import, with an explicit retry if it fails.
+  async function openLinkedRepository(repo){
+    setText('loadingHint',`Opening ${repo}…`);
+    const progressTimer=setTimeout(()=>{
+      setText('loadingHint',`Building the city from public GitHub sources for ${repo}…`);
+    },9000);
+    try{
+      const result=await post('/api/my-repos',{url:repo});
+      await refreshSession();
+      state.activeId=result.id;
+      rememberPublicRepo(state.repos.find(item=>item.id===result.id)?.fullName);
+      showView();
+      await useGraph(result.graph);
+      toast(`${result.graph.name} is ready. Drag the city to explore.`);
+    }catch(e){
+      // An unavailable or rate-limited backend cannot masquerade as a city.
+      // Keep the exact public repo prefilled for a one-click manual retry.
+      showView();showEmpty();startImport();
+      $('importInput').value=repo;
+      setText('importError',`Could not open this repository automatically: ${e.message}`);
+      $('importError').hidden=false;
+      $('importDemo').hidden=e.status!==429;
+    }finally{
+      clearTimeout(progressTimer);
+    }
+  }
+
   async function openFictionalDemo(){
     if(state.busy)return;
     state.busy=true;$('importDemo').disabled=true;
@@ -1190,15 +1219,19 @@
     },8000);
     try{
       await refreshSession();
-      showView();
+      clearTimeout(waking);
       const requested=deepLinkedRepo();
-      // A shared URL never triggers a network import or AI call automatically.
-      // Existing browser snapshots open immediately; new browsers must confirm
-      // the import explicitly, keeping anonymous API use under user control.
+      // Direct /owner/repo URLs automatically open public cities, while the
+      // legacy ?repo= link remains confirmation-only for compatibility.
+      const directPath=Boolean(requested&&window.location?.pathname!=='/');
       const existing=requested&&state.repos.find(repo=>repo.fullName?.toLowerCase()===requested.toLowerCase());
       if(existing){
+        showView();
         await selectRepo(existing.id);
+      }else if(directPath){
+        await openLinkedRepository(requested);
       }else{
+        showView();
         if(state.activeId)await selectRepo(state.activeId);else showEmpty();
         if(requested){
           startImport();
