@@ -5,7 +5,7 @@
 (function(){
   'use strict';
   const REPO=/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?\/[A-Za-z0-9_.-]{1,100}$/;
-  const MAX_FILES=100;
+  const PAGE_SIZE=100, MAX_PAGES=3, MAX_FILES=PAGE_SIZE*MAX_PAGES;
   const VALID_STATUS=new Set(['added','modified','removed','renamed','copied','changed','unchanged']);
   function repositoryFromGraph(graph){
     if(graph?.source!=='github'||typeof graph.url!=='string')return null;
@@ -77,7 +77,8 @@
   }
   function normalizeFile(row){
     if(!row||!validPath(row.filename)||!VALID_STATUS.has(row.status))return null;
-    const previous=row.status==='renamed'&&validPath(row.previous_filename)?row.previous_filename:null;
+    const prior=row.previous_filename||row.previousFilename;
+    const previous=row.status==='renamed'&&validPath(prior)?prior:null;
     const count=value=>Number.isSafeInteger(value)&&value>=0&&value<=10000000?value:null;
     return {filename:row.filename,status:row.status,previousFilename:previous,
             additions:count(row.additions),deletions:count(row.deletions)};
@@ -87,28 +88,30 @@
     const id=validPullNumber(number);
     if(id===null)throw Error('Enter a valid positive GitHub pull request number.');
     if(!Array.isArray(raw))throw Error('GitHub returned an invalid pull-request file list.');
-    const files=[],touched=new Set();let ignored=raw.length>MAX_FILES;
+    const files=[],touched=new Set();let invalidRecords=Math.max(0,raw.length-MAX_FILES);
     for(const source of raw.slice(0,MAX_FILES)){
       const row=normalizeFile(source);
-      if(!row){ignored=true;continue;}
+      if(!row){invalidRecords++;continue;}
       const mapped=mapOneFile(graph,row);
       files.push({...row,mapped});
       if(mapped)touched.add(mapped.nodeId);
     }
     return {number:id,repository:repositoryFromGraph(graph),files,
-            partial:hasNext||raw.length>=MAX_FILES||ignored,
+            partial:Boolean(hasNext)||invalidRecords>0,invalidRecords,
             mapped:files.filter(row=>row.mapped).length,
             unmapped:files.filter(row=>!row.mapped).length,
             moduleCount:touched.size,
             scope:'GitHub-reported changed files. Mappings use imported, potentially partial paths. Directory matches are hints only; no runtime impact or defect is verified.'};
   }
-  async function load(graph,number){
+  async function fetchPage(graph,number,page){
     const repo=repositoryFromGraph(graph),id=validPullNumber(number);
     if(!repo)throw Error('Only saved, public GitHub repositories support pull-request previews.');
     if(id===null)throw Error('Enter a pull request number from 1 to 999999999.');
+    if(!Number.isInteger(page)||page<1||page>MAX_PAGES)
+      throw Error('GitCity supports at most the first 300 public PR files. View the remainder on GitHub.');
     const [owner,name]=repo.split('/');
     const url='https://api.github.com/repos/'+encodeURIComponent(owner)+'/'+encodeURIComponent(name)+
-      '/pulls/'+id+'/files?per_page=100&page=1';
+      '/pulls/'+id+'/files?per_page='+PAGE_SIZE+'&page='+page;
     const controller=typeof AbortController==='function'?new AbortController():null;
     const timer=controller?setTimeout(()=>controller.abort(),15000):null;
     let response;
@@ -119,15 +122,44 @@
     }catch{
       throw Error('GitHub pull-request files could not be fetched by this browser. Retry later.');
     }finally{if(timer!==null)clearTimeout(timer);}
-    if(response.status===403||response.status===429)throw Error('GitHub is rate-limiting this browser. Retry after its API budget resets.');
+    if(response.status===403||response.status===429)
+      throw Error('GitHub denied or rate-limited this browser request. Retry after its API budget resets.');
     if(response.status===404)throw Error('Pull request not found or not publicly accessible.');
     if(!response.ok)throw Error('GitHub pull-request file endpoint returned HTTP '+response.status+'.');
     let rows;
     try{rows=await response.json();}catch{throw Error('GitHub returned unreadable pull-request data.');}
+    if(!Array.isArray(rows))throw Error('GitHub returned an unexpected changed-file list.');
+    // Use only the presence of a real next-page link. Never follow provider
+    // URLs blindly or construct requests to arbitrary origins.
     const link=response.headers?.get?.('Link')||'';
-    return analyze(graph,id,rows,/rel=["']?next/.test(link));
+    return {rows,hasNext:/(?:^|,)\s*<[^>]+>;\s*rel=["']?next\b/.test(link)};
+  }
+  async function load(graph,number){
+    const page=await fetchPage(graph,number,1);
+    const result=analyze(graph,number,page.rows,page.hasNext);
+    return {...result,pagesLoaded:1,nextPage:page.hasNext?2:null,capped:false};
+  }
+  async function loadMore(graph,previous){
+    const repo=repositoryFromGraph(graph);
+    if(!repo||previous?.repository?.toLowerCase()!==repo.toLowerCase()||
+       validPullNumber(previous?.number)===null||
+       !Number.isInteger(previous?.nextPage)||previous.nextPage<2||previous.nextPage>MAX_PAGES)
+      throw Error('The PR preview is no longer current. Inspect the pull request again.');
+    const page=await fetchPage(graph,previous.number,previous.nextPage);
+    const existing=previous.files.map(row=>({
+      filename:row.filename,status:row.status,previous_filename:row.previousFilename,
+      additions:row.additions,deletions:row.deletions
+    }));
+    const all=analyze(graph,previous.number,[...existing,...page.rows],page.hasNext);
+    // Keep any skipped invalid records from previous pages in the disclosure.
+    const invalidRecords=(previous.invalidRecords||0)+(all.invalidRecords||0);
+    const capped=previous.nextPage===MAX_PAGES&&page.hasNext;
+    return {...all,invalidRecords,partial:all.partial||invalidRecords>0,
+      pagesLoaded:previous.nextPage,
+      nextPage:page.hasNext&&previous.nextPage<MAX_PAGES?previous.nextPage+1:null,
+      capped};
   }
   window.GitCityPullImpact=Object.freeze({
-    repositoryFromGraph,validPullNumber,pullNumberFromInput,validPath,analyze,load
+    repositoryFromGraph,validPullNumber,pullNumberFromInput,validPath,analyze,load,loadMore
   });
 })();
