@@ -82,10 +82,9 @@ async def test_unverified_provider_status_fails_closed_with_retry(status,seconds
     async with client:
         with pytest.raises(github.RepoError) as err:
             await proof.require_current_public("public","demo",client=client)
-    assert err.value.status==503
-    assert err.value.retry_after==seconds
-    # A second user cannot repeatedly hit the provider before Retry-After.
-    async with client:
+        assert err.value.status==503
+        assert err.value.retry_after==seconds
+        # A second user cannot repeatedly hit the provider before Retry-After.
         with pytest.raises(github.RepoError) as blocked:
             await proof.require_current_public("public","demo",client=client)
     assert blocked.value.status==503
