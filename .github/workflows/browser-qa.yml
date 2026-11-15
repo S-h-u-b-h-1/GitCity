@@ -43,6 +43,7 @@ jobs:
           python -m app.tests.share_links_browser_smoke
           python -m app.tests.source_location_browser_smoke
           python -m app.tests.zoom_browser_smoke
+          python -m app.tests.pr_impact_browser_smoke
       - name: Upload offline screenshots for review
         if: always()
         uses: actions/upload-artifact@v4
