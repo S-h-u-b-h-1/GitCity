@@ -12,6 +12,7 @@
   <script defer src="/static/browser-radar.js"></script>
   <script defer src="/static/investigation-notes.js"></script>
   <script defer src="/static/offline-city.js"></script>
+  <script defer src="/static/pr-impact.js"></script>
   <script defer src="/static/app.js"></script>
 </head>
 <body>
@@ -79,7 +80,7 @@
       <div class="tool-segments" role="group" aria-label="City layers">
         <button type="button" data-layer="structure" class="active">City</button><button type="button" data-layer="dependencies">Links</button><button type="button" data-layer="flows">Paths</button><button type="button" data-layer="hotspots">Hubs</button>
       </div>
-      <div class="tool-controls"><button type="button" id="resetCamera">⟲ <span>Overview</span></button><button type="button" id="tourButton">✧ <span>Guided tour</span></button><button type="button" id="findButton">⌕ <span>Find module</span></button></div>
+      <div class="tool-controls"><button type="button" id="resetCamera">⟲ <span>Overview</span></button><button type="button" id="tourButton">✧ <span>Guided tour</span></button><button type="button" id="findButton">⌕ <span>Find module</span></button><button type="button" id="prImpactShortcut">◇ <span>PR impact</span></button></div>
       <div class="district-controls"><label for="districtJump">JUMP TO A DISTRICT</label><select id="districtJump" aria-label="Focus on a code district"></select></div>
       <div class="city-camera-controls"><button type="button" id="focusHub" title="Focus the module with the most sampled static links">✧ Focus most connected module</button><div class="zoom-buttons"><button type="button" id="zoomOut" aria-label="Zoom out of city">−</button><button type="button" id="zoomIn" aria-label="Zoom into city">+</button></div></div>
       <div class="building-controls" role="group" aria-label="Navigate between real code buildings"><button type="button" id="previousBuilding">← Previous building</button><button type="button" id="nextBuilding">Next building →</button></div>
@@ -175,6 +176,7 @@
         <button type="button" data-compass-tab="ask" class="active" aria-pressed="true">Assistant</button>
         <button type="button" data-compass-tab="issues" aria-pressed="false">Open issues <span id="issuesTabCount" hidden></span></button>
         <button type="button" data-compass-tab="find" aria-pressed="false">Find code</button>
+        <button type="button" data-compass-tab="pr" aria-pressed="false">PR impact</button>
       </div>
       <div class="compass-shortcuts compass-map-entry"><button type="button" id="showMapOptions" aria-label="Open city map controls">City controls <span aria-hidden="true">↗</span></button></div>
       <div id="findTab" hidden>
@@ -211,6 +213,22 @@
         <div class="issue-filters"><input id="issueFilterText" type="search" maxlength="100" autocomplete="off" aria-label="Search sampled GitHub issues" placeholder="Search titles, labels or issue number…"><select id="issueFilterType" aria-label="Filter sampled GitHub issues"><option value="all">All issues</option><option value="bug">Bugs</option><option value="good-first">Good first issues</option><option value="enhancement">Features &amp; enhancements</option><option value="mapped">Has city location hint</option></select></div>
         <div id="issueList" class="issue-list" role="status" aria-live="polite"></div>
         <p class="issue-disclaimer" id="issueDisclaimer">Placement is based on explicit file references or clearly labeled suggestions; unplaced issues stay unplaced.</p>
+      </div>
+      <div id="prTab" class="pr-tab" hidden>
+        <h2>Pull request impact</h2>
+        <p class="compass-intro">See exactly which changed GitHub files appear in this city. An unmatched file stays unmatched; directory links are only location hints.</p>
+        <label for="prInput">Pull request number or GitHub URL</label>
+        <div class="pr-query">
+          <input id="prInput" type="text" maxlength="300" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="#123 or github.com/owner/repo/pull/123">
+          <button type="button" id="prLoad">Inspect PR</button>
+        </div>
+        <p id="prStatus" class="pr-status" role="status" aria-live="polite">Enter a pull request in this repository. GitCity reads the first 100 changed files directly from the public GitHub API.</p>
+        <div class="pr-actions">
+          <a id="prOpenGithub" href="https://github.com" target="_blank" rel="noopener noreferrer" hidden>View pull request on GitHub ↗</a>
+          <button type="button" id="prClear" hidden>Clear map highlights</button>
+        </div>
+        <div id="prResults" class="pr-results" role="list" aria-live="polite"></div>
+        <p id="prScope" class="issue-disclaimer">Only changed-file paths are reported. City mappings are based on imported paths and may be partial; GitCity does not prove defects, runtime effects, or test failures.</p>
       </div>
     </form>
   </dialog>

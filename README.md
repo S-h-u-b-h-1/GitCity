@@ -2,6 +2,8 @@
 
 **Formerly RepoWorld.** The existing application, commit history, public city file format, and BharatCode submission provenance are preserved.
 
+**Pull request impact preview:** Choose **PR impact** from the city developer console or open `/owner/repo/pull/123`. GitCity retrieves up to the first 100 changed-file paths from GitHub's public read-only API **in your browser**, highlights imported city buildings matched by exact indexed paths (or explicitly weaker directory hints), and labels unmapped changes. No provider token, model call, code execution or GitHub write is involved; results may be incomplete if the imported city is partial or a PR has more than 100 files. GitHub browser requests remain subject to GitHub's own rate limits.
+
 **Shareable GitCity URLs:** [S-h-u-b-h-1/GitCity](https://gitcity-one.vercel.app/S-h-u-b-h-1/GitCity) · [facebook/react](https://gitcity-one.vercel.app/facebook/react). The interface accepts `/owner/repo`, opens a previously saved city immediately or automatically imports the requested **public** GitHub repository for a new browser, and displays the city without confirmation. Automatic imports are subject to the existing abuse-prevention quotas; on an import error, GitCity offers a prefilled manual retry. Legacy `?repo=owner%2Frepo` links retain their confirmation-only behavior.
 
 **Requested domain:** `gitcity.vercel.app` is currently assigned to a different Vercel team (Vercel `409 owned-on-other-team`). The production hostname remains `gitcity-one.vercel.app` until domain ownership is released or transferred.

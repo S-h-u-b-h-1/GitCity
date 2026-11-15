@@ -36,7 +36,7 @@
     constructor(canvas, options={}){
       this.canvas=canvas;this.ctx=canvas.getContext('2d',{alpha:false});
       this.onSelect=options.onSelect||(()=>{});this.onIssueSelect=options.onIssueSelect||(()=>{});this.onDistrictSelect=options.onDistrictSelect||(()=>{});this.onHover=options.onHover||(()=>{});
-      this.nodes=[];this.edges=[];this.districts=[];this.hotspots=[];this.mode='structure';this.selected=null;this.hovered=null;this.impact=null;this.issueMarkers=new Map();this.districtHitAreas=[];
+      this.nodes=[];this.edges=[];this.districts=[];this.hotspots=[];this.mode='structure';this.selected=null;this.hovered=null;this.impact=null;this.prChangedNodes=new Set();this.issueMarkers=new Map();this.districtHitAreas=[];
       this.yaw=-.71;this.pitch=.85;this.distance=140;this.targetDistance=140;this.overviewDistance=140;this.zoomAnchor=null;
       this.pan={x:0,z:0};this.targetPan={x:0,z:0};this.activeDistrict=null;
       this.width=0;this.height=0;this.pixelRatio=1;this.spin=false;this.traffic=true;
@@ -133,7 +133,7 @@
       for(const edge of this.edges){edge.a.degree++;edge.b.degree++;}
       this.hotspots=[...nodes].filter(n=>n.degree>=2).sort((a,b)=>b.degree-a.degree||b.fileCount-a.fileCount).slice(0,5);
       for(const district of this.districts){const main=[...district.nodes].sort((a,b)=>b.degree-a.degree||b.fileCount-a.fileCount)[0];if(main)main.landmark=true;}
-      this.selected=null;this.hovered=null;this.activeDistrict=null;this.impact=null;
+      this.selected=null;this.hovered=null;this.activeDistrict=null;this.impact=null;this.prChangedNodes.clear();
       // A repository with only three districts can still have far-apart islands.
       // Fit the *actual projected island bounds* instead of assuming fewer districts
       // always means a closer camera. This prevents clipped cities on first load.
@@ -164,6 +164,10 @@
         direct:new Set((trace.direct||[]).map(i=>i.nodeId).filter(i=>ids.has(i))),
         indirect:new Set((trace.indirect||[]).map(i=>i.nodeId).filter(i=>ids.has(i))),
         edges:new Set((trace.edges||[]).filter(e=>ids.has(e.source)&&ids.has(e.target)).map(e=>e.source+'\0'+e.target))};
+    }
+    setPullChangedNodes(ids){
+      const known=new Set(this.nodes.map(n=>n.id));
+      this.prChangedNodes=new Set((Array.isArray(ids)?ids:[]).filter(id=>known.has(id)));
     }
     setSelected(id,{focus=false}={}){
       const node=this.nodes.find(n=>n.id===id);if(!node)return;
@@ -669,10 +673,12 @@
       const neighbors=this.edges.some(e=>e.a.id===this.selected&&e.b.id===n.id||e.b.id===this.selected&&e.a.id===n.id);
       const tracedDirect=this.impact?.direct.has(n.id),tracedIndirect=this.impact?.indirect.has(n.id);
       const traced=tracedDirect||tracedIndirect;
+      const prChanged=this.prChangedNodes.has(n.id);
       const outsideFocus=Boolean(this.activeDistrict&&n.kind!==this.activeDistrict);
-      const dim=outsideFocus||(this.impact?!selected&&!traced:this.mode==='dependencies'&&!selected&&!neighbors);
+      const prDim=this.prChangedNodes.size>0&&!prChanged&&!selected;
+      const dim=outsideFocus||prDim||(this.impact?!selected&&!traced:this.mode==='dependencies'&&!selected&&!neighbors);
       const hot=this.mode==='hotspots'&&this.hotspots.some(item=>item.id===n.id);
-      const color=tracedDirect?'#efbd89':tracedIndirect?'#b6acff':hot?'#ff5d89':n.color,w=n.width,h=n.height;
+      const color=prChanged?'#f3c58b':tracedDirect?'#efbd89':tracedIndirect?'#b6acff':hot?'#ff5d89':n.color,w=n.width,h=n.height;
       const verts=[[-w,0,-w],[w,0,-w],[w,0,w],[-w,0,w],[-w,h,-w],[w,h,-w],[w,h,w],[-w,h,w]];
       const pts=verts.map(p=>this.project(n.x+p[0],p[1],n.z+p[2]));
       const depth=this.project(n.x,h*.5,n.z).depth;
@@ -681,9 +687,9 @@
       const shadow=ctx.createRadialGradient(base.x,base.y,0,base.x,base.y,Math.max(14,base.scale*7));
       shadow.addColorStop(0,rgba(color,selected?.33:.17));shadow.addColorStop(1,rgba(color,0));
       ctx.fillStyle=shadow;ctx.beginPath();ctx.ellipse(base.x,base.y,Math.max(12,base.scale*7),Math.max(4,base.scale*3.4),0,0,PI2);ctx.fill();
-      if(selected||hovered||hot||traced){
+      if(selected||hovered||hot||traced||prChanged){
         const pulse=selected&&!this.motion?.12*Math.sin(now*.004):0;
-        ctx.strokeStyle=rgba(color,selected?.78+pulse:hovered?.55:traced?.67:.4);ctx.lineWidth=selected?2.2:traced?1.8:1.3;
+        ctx.strokeStyle=rgba(color,selected?.78+pulse:hovered?.55:traced?.67:prChanged?.82:.4);ctx.lineWidth=selected?2.2:traced||prChanged?1.8:1.3;
         ctx.shadowColor=color;ctx.shadowBlur=selected?18:traced?12:6;
         ctx.beginPath();ctx.ellipse(base.x,base.y,base.scale*(w*2+1.1),base.scale*(w+.5),0,0,PI2);ctx.stroke();ctx.shadowBlur=0;
       }
@@ -767,7 +773,7 @@
       // Avoid 60 overlapping file labels. Show district landmarks by default,
       // and reveal other names on selection, hover, or closer camera zoom.
       const candidates=hits.filter(h=>(!this.activeDistrict||h.node.kind===this.activeDistrict)&&
-        (h.selected||h.hovered||(this.impact?.direct.has(h.node.id)&&this.distance<=92)||(h.node.landmark&&this.distance<=84)||this.distance<=58))
+        (h.selected||h.hovered||(this.prChangedNodes.has(h.node.id)&&this.distance<=95)||(this.impact?.direct.has(h.node.id)&&this.distance<=92)||(h.node.landmark&&this.distance<=84)||this.distance<=58))
         .sort((a,b)=>Number(b.selected)-Number(a.selected)||Number(b.hovered)-Number(a.hovered)||Number(b.node.landmark)-Number(a.node.landmark));
       const placed=[];
       for(const h of candidates){
