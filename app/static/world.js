@@ -656,9 +656,11 @@
         const traceEdge=this.impact?.edges.has(edge.a.id+'\0'+edge.b.id);
         const reviewEdge=this.prReviewEdges.has(edge.a.id+'\0'+edge.b.id);
         if(this.impact&&!traceEdge)continue;
-        const active=this.impact?traceEdge:reviewEdge||this.mode==='flows'?path?.has(edge)||reviewEdge:this.mode==='dependencies'||this.mode==='dependencies'||
-          this.mode==='hotspots'?(this.mode==='dependencies'||hotspots.has(edge.a.id)||hotspots.has(edge.b.id)):
-            edge.a.id===this.selected||edge.b.id===this.selected;
+        const regularActive=this.mode==='flows'?path.has(edge):
+          this.mode==='dependencies'?true:
+            this.mode==='hotspots'?(hotspots.has(edge.a.id)||hotspots.has(edge.b.id)):
+              edge.a.id===this.selected||edge.b.id===this.selected;
+        const active=this.impact?traceEdge:(reviewEdge||regularActive);
         if(this.mode==='structure'&&!active)continue;
         const cross=edge.a.kind!==edge.b.kind;
         const elevation=cross?2.1:.45;
@@ -708,8 +710,10 @@
       ctx.fillStyle=shadow;ctx.beginPath();ctx.ellipse(base.x,base.y,Math.max(12,base.scale*7),Math.max(4,base.scale*3.4),0,0,PI2);ctx.fill();
       if(selected||hovered||hot||traced||prChanged||prDirect||prIndirect){
         const pulse=selected&&!this.motion?.12*Math.sin(now*.004):0;
-        ctx.strokeStyle=rgba(color,selected?.78+pulse:hovered?.55:traced?.67:(prChanged||prDirect||prIndirect)?.82:.4);
-        ctx.lineWidth=selected?2.2:traced||prChanged||prDirect||prIndirect?1.8:1.3;
+        const highlighted=prChanged||prDirect||prIndirect;
+        const glowStrength=selected?(.78+pulse):hovered?.55:traced?.67:highlighted?.82:.4;
+        ctx.strokeStyle=rgba(color,glowStrength);
+        ctx.lineWidth=selected?2.2:traced||highlighted?1.8:1.3;
         ctx.shadowColor=color;ctx.shadowBlur=selected?18:traced?12:6;
         ctx.beginPath();ctx.ellipse(base.x,base.y,base.scale*(w*2+1.1),base.scale*(w+.5),0,0,PI2);ctx.stroke();ctx.shadowBlur=0;
       }
