@@ -32,6 +32,19 @@ test('PR number/repository/path validation rejects external and unsafe inputs',(
    assert.equal(p.validPath(name),false,name);
  }
 });
+test('PR number and canonical GitHub PR URLs stay bound to the current graph',()=>{
+ const p=runtime();
+ assert.equal(p.pullNumberFromInput(graph,'#25'),25);
+ assert.equal(p.pullNumberFromInput(graph,'25'),25);
+ assert.equal(p.pullNumberFromInput(graph,'https://github.com/PUBLIC/demo/pull/25'),25);
+ for(const input of [
+   'https://github.com/attacker/demo/pull/25',
+   'https://github.com/public/demo/issues/25',
+   'https://github.com/public/demo/pull/25?token=x',
+   'https://user:pw@github.com/public/demo/pull/25',
+   '#0', 'not-an-id', '<script>alert(1)</script>'
+ ])assert.equal(p.pullNumberFromInput(graph,input),null,input);
+});
 test('actual changed indexed files, renamed paths, directory hints and unmatched files stay distinct',()=>{
  const p=runtime();
  const found=p.analyze(graph,25,[

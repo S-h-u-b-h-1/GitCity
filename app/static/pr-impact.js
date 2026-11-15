@@ -23,6 +23,25 @@
     if(typeof raw!=='string'||!(/^[1-9][0-9]{0,8}$/.test(raw)))return null;
     return Number(raw);
   }
+  // Accept a PR number, #number, or an exact GitHub /owner/repo/pull/number URL.
+  // Reject URLs to other repositories and never permit embedded credentials.
+  function pullNumberFromInput(graph,input){
+    const repo=repositoryFromGraph(graph);
+    if(!repo||typeof input!=='string')return null;
+    const raw=input.trim();
+    const simple=raw.startsWith('#')?raw.slice(1):raw;
+    const numeric=validPullNumber(simple);
+    if(numeric!==null)return numeric;
+    if(!raw.startsWith('https://')||raw.length>300)return null;
+    try{
+      const parsed=new URL(raw);
+      if(parsed.origin!=='https://github.com'||parsed.username||parsed.password||
+         parsed.search||parsed.hash)return null;
+      const match=/^\/([^/]+)\/([^/]+)\/pull\/([1-9][0-9]{0,8})\/?$/.exec(parsed.pathname);
+      if(!match||repo.toLowerCase()!==(match[1]+'/'+match[2]).toLowerCase())return null;
+      return validPullNumber(match[3]);
+    }catch{return null;}
+  }
   function validPath(value){
     if(typeof value!=='string'||!value||value.length>450||value.startsWith('/')||
        value.includes('\\')||/[\x00-\x1f\x7f]/.test(value))return false;
@@ -68,10 +87,10 @@
     const id=validPullNumber(number);
     if(id===null)throw Error('Enter a valid positive GitHub pull request number.');
     if(!Array.isArray(raw))throw Error('GitHub returned an invalid pull-request file list.');
-    const files=[],touched=new Set(),ignored=raw.length>MAX_FILES;
+    const files=[],touched=new Set();let ignored=raw.length>MAX_FILES;
     for(const source of raw.slice(0,MAX_FILES)){
       const row=normalizeFile(source);
-      if(!row){ignored;continue;}
+      if(!row){ignored=true;continue;}
       const mapped=mapOneFile(graph,row);
       files.push({...row,mapped});
       if(mapped)touched.add(mapped.nodeId);
@@ -109,6 +128,6 @@
     return analyze(graph,id,rows,/rel=["']?next/.test(link));
   }
   window.GitCityPullImpact=Object.freeze({
-    repositoryFromGraph,validPullNumber,validPath,analyze,load
+    repositoryFromGraph,validPullNumber,pullNumberFromInput,validPath,analyze,load
   });
 })();
