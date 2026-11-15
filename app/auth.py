@@ -150,9 +150,14 @@ def _is_allowed_origin(request: Request, origin: str) -> bool:
     if not configured or not incoming:
         return False
 
-    # Public deployment must use the configured HTTPS origin exactly.
+    # The GitCity Vercel frontend proxies API calls to this existing Render app.
+    # Trust only an exact production origin; never wildcard *.vercel.app.
     if os.environ.get("APP_ENV", "development").lower() == "production":
-        return origin == base_url()
+        allowed = {base_url(), "https://gitcity-one.vercel.app"}
+        optional = os.environ.get("GITCITY_PUBLIC_ORIGIN", "").strip()
+        if optional.startswith("https://") and _origin_parts(optional):
+            allowed.add(optional)
+        return origin in allowed
 
     loopback = {"localhost", "127.0.0.1", "::1"}
     # Validate the *actual* Host header, not just the advertised app URL.
