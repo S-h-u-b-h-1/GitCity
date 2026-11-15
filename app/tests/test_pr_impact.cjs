@@ -68,7 +68,7 @@ test('changing file names never fabricates a module match; partial listings rema
  const rows=Array.from({length:100},(_,i)=>({filename:'external/file'+i+'.ts',
    status:'modified',additions:1,deletions:0}));
  const found=p.analyze(graph,2,rows);
- assert.equal(found.partial,true);
+ assert.equal(found.partial,false,'Exactly 100 files with no next-page link is complete');
  assert.equal(found.mapped,0);
  assert.equal(found.unmapped,100);
 });
@@ -87,7 +87,7 @@ test('browser request is public read-only, bounded, origin-checked and honest on
  assert.equal(calls[0].opts.redirect,'error');
  assert.ok(!calls[0].opts.headers.Authorization);
  const limited=runtime(async()=>({status:429,ok:false,headers:{get:()=>null}}));
- await assert.rejects(limited.load(graph,45),/rate-limiting/);
+ await assert.rejects(limited.load(graph,45),/denied or rate-limited/);
  const privatePR=runtime(async()=>({status:404,ok:false,headers:{get:()=>null}}));
  await assert.rejects(privatePR.load(graph,45),/not found/);
 });
@@ -102,4 +102,63 @@ test('PR response cannot inject HTML or unsupported statuses into city changes',
  assert.equal(bad.files[0].mapped,null);
  assert.equal(bad.files[1].additions,null);
  assert.equal(bad.files[1].deletions,null);
+});
+
+test('GitHub PR pages load on demand and merge actual file mapping',async()=>{
+ const requests=[];
+ const p=runtime(async(url,opts)=>{
+   requests.push(url);
+   const page=new URL(url).searchParams.get('page');
+   const rows=page==='1'
+     ?Array.from({length:100},(_,i)=>({filename:'outside/file-'+i+'.ts',status:'modified',additions:1,deletions:0}))
+     :[{filename:'services/api/main.py',status:'modified',additions:3,deletions:2}];
+   const next=page==='1'?'<https://api.github.com/repos/public/demo/pulls/25/files?per_page=100&page=2>; rel="next"':'';
+   return {status:200,ok:true,headers:{get:key=>key==='Link'?next:null},
+     json:async()=>rows};
+ });
+ const first=await p.load(graph,25);
+ assert.equal(first.files.length,100);
+ assert.equal(first.partial,true);
+ assert.equal(first.nextPage,2);
+ assert.equal(first.mapped,0);
+ assert.equal(requests.length,1,'No second page without explicit action');
+ const second=await p.loadMore(graph,first);
+ assert.equal(second.files.length,101);
+ assert.equal(second.mapped,1);
+ assert.equal(second.nextPage,null);
+ assert.equal(second.partial,false);
+ assert.equal(requests.length,2);
+ assert.match(requests[1],/page=2$/);
+});
+
+test('PR API page limit is three pages with explicit remainder warning',async()=>{
+ const requests=[];
+ const p=runtime(async(url,opts)=>{
+   requests.push(url);
+   const page=Number(new URL(url).searchParams.get('page'));
+   const rows=Array.from({length:100},(_,i)=>({
+     filename:'other/file-'+page+'-'+i+'.py',status:'modified',additions:0,deletions:0
+   }));
+   return {status:200,ok:true,
+     headers:{get:key=>key==='Link'?'<https://api.github.com/repos/public/demo/pulls/7/files?per_page=100&page='+(page+1)+'>; rel="next"':null},
+     json:async()=>rows};
+ });
+ const first=await p.load(graph,7);
+ const second=await p.loadMore(graph,first);
+ const third=await p.loadMore(graph,second);
+ assert.equal(third.files.length,300);
+ assert.equal(third.nextPage,null);
+ assert.equal(third.partial,true);
+ assert.equal(third.capped,true);
+ assert.equal(requests.length,3);
+ await assert.rejects(p.loadMore(graph,third),/no longer current/);
+ assert.equal(requests.length,3);
+});
+
+test('PR pagination rejects stale repository context and impossible page values',async()=>{
+ const p=runtime(async()=>{throw Error('Must not fetch');});
+ await assert.rejects(p.loadMore(graph,{repository:'attacker/repo',number:7,nextPage:2,files:[]}),
+   /no longer current/);
+ await assert.rejects(p.loadMore(graph,{repository:'public/demo',number:7,nextPage:99,files:[]}),
+   /no longer current/);
 });

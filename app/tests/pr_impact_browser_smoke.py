@@ -56,14 +56,47 @@ async def main():
             assert "1 UNMAPPED" in (await page.locator("#prStatus").inner_text())
             assert await page.locator("#prOpenGithub").get_attribute("href")==(
                 "https://github.com/testowner/demo-city/pull/31")
+            assert page.url=="https://gitcity.test/testowner/demo-city/pull/31",page.url
             assert len(await page.evaluate("window.__PR_HTTP_CALLS__"))==1
             assert await page.locator("#prResults .pr-file-row").first.get_attribute(
                 "data-evidence")=="indexed-file"
-            await page.locator("#prResults button.pr-file-row").first.click()
+            # Clearing the review removes only the map highlights and PR route.
+            await page.locator("#prClear").click()
+            assert page.url=="https://gitcity.test/testowner/demo-city"
+            await page.evaluate("""({path})=>{
+                window.__MORE_PAGE_CALLS__=[];
+                const oldFetch=window.fetch;
+                window.fetch=async(url,opts={})=>{
+                    if(String(url).includes('/pulls/31/files?')){
+                        const n=Number(new URL(String(url)).searchParams.get('page'));
+                        window.__MORE_PAGE_CALLS__.push(n);
+                        const rows=n===1?Array.from({length:100},(_,i)=>({
+                            filename:'outside/file-'+i+'.py',status:'modified',additions:1,deletions:0
+                        })):[{filename:path,status:'modified',additions:3,deletions:1}];
+                        const headers={'Content-Type':'application/json'};
+                        if(n===1)headers.Link='<https://api.github.com/repos/testowner/demo-city/pulls/31/files?per_page=100&page=2>; rel="next"';
+                        return new Response(JSON.stringify(rows),{status:200,headers});
+                    }
+                    return oldFetch(url,opts);
+                };
+            }""",{"path":path})
+            await page.locator("#prInput").fill("31")
+            await page.locator("#prLoad").click()
+            await page.locator("#prResults .pr-file-row").nth(99).wait_for(state="visible",timeout=12000)
+            assert await page.locator("#prResults .pr-file-row").count()==100
+            assert await page.locator("#prMore").is_visible()
+            assert await page.evaluate("window.__MORE_PAGE_CALLS__")==[1]
+            await page.locator("#prMore").click()
+            await page.locator("#prResults .pr-file-row").nth(100).wait_for(state="visible",timeout=12000)
+            assert await page.locator("#prResults .pr-file-row").count()==101
+            assert await page.evaluate("window.__MORE_PAGE_CALLS__")==[1,2]
+            assert await page.locator("#prMore").is_hidden()
+            assert "1 FILE MATCH" in (await page.locator("#prStatus").inner_text())
+            await page.locator("#prResults button.pr-file-row").click()
             await page.locator("#inspector").wait_for(state="visible",timeout=9000)
             assert not await page.evaluate("document.documentElement.scrollWidth>innerWidth")
             assert not errors,errors
-            print(f"{width}x{height}: PR #31 mapped file, unmapped file, city inspector OK")
+            print(f"{width}x{height}: PR route sharing, 100+1 on-demand pages, city inspector OK")
             await page.close()
         await browser.close()
 

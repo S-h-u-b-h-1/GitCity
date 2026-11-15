@@ -222,12 +222,13 @@
           <input id="prInput" type="text" maxlength="300" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="#123 or github.com/owner/repo/pull/123">
           <button type="button" id="prLoad">Inspect PR</button>
         </div>
-        <p id="prStatus" class="pr-status" role="status" aria-live="polite">Enter a pull request in this repository. GitCity reads the first 100 changed files directly from the public GitHub API.</p>
+        <p id="prStatus" class="pr-status" role="status" aria-live="polite">Enter a pull request in this repository. GitCity reads up to 100 files initially, with optional pages up to 300.</p>
         <div class="pr-actions">
           <a id="prOpenGithub" href="https://github.com" target="_blank" rel="noopener noreferrer" hidden>View pull request on GitHub ↗</a>
           <button type="button" id="prClear" hidden>Clear map highlights</button>
         </div>
         <div id="prResults" class="pr-results" role="list" aria-live="polite"></div>
+        <button type="button" id="prMore" class="pr-more" hidden>Load next 100 files</button>
         <p id="prScope" class="issue-disclaimer">Only changed-file paths are reported. City mappings are based on imported paths and may be partial; GitCity does not prove defects, runtime effects, or test failures.</p>
       </div>
     </form>

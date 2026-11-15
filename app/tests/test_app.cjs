@@ -33,7 +33,7 @@ class FakeElement{
   focus(){}
   closest(){return null;}
 }
-function makeApp({authenticated=true,active=true,assistantResult=null,multipleIssues=false,importFailure=null,issueFailure=null,issueFailureMessage=null,browserIssues=null,browserIssueError=null,sourceLeadResult=null,sourceLeadError=null,deepLink='',routePath='/',storedLastRepo=null,storedOfflineCity=null,storageThrows=false,deferSession=false,deferImport=false,prFiles=null,prFailure=null}={}){
+function makeApp({authenticated=true,active=true,assistantResult=null,multipleIssues=false,importFailure=null,issueFailure=null,issueFailureMessage=null,browserIssues=null,browserIssueError=null,sourceLeadResult=null,sourceLeadError=null,deepLink='',routePath='/',storedLastRepo=null,storedOfflineCity=null,storageThrows=false,deferSession=false,deferImport=false,prFiles=null,prFailure=null,prPages=null}={}){
   let releaseSession;
   const sessionGate=deferSession?new Promise(resolve=>{releaseSession=resolve;}):null;
   let releaseImport;
@@ -57,13 +57,18 @@ function makeApp({authenticated=true,active=true,assistantResult=null,multipleIs
     aiConfigured:false});
   const calls=[];
   async function fetchStub(url,opts={}){
-    calls.push({url,opts});let body=null,code=200;
+    calls.push({url,opts});let body=null,code=200,link=null;
     if(url==='/api/session'){if(sessionGate)await sessionGate;body=session();}
     else if(url==='/api/my-repos/demo')body={id:'demo',graph:GRAPH};
     else if(url==='/api/demo')body={...GRAPH,source:'demo',url:'',owner:'Repoworld Studio',name:'Orbit Commerce',warnings:['Fictional demonstration only.']};
     else if(typeof url==='string'&&url.startsWith('https://api.github.com/repos/')&&url.includes('/pulls/')&&url.includes('/files?')){
       if(prFailure){code=prFailure.status;body={message:prFailure.message};}
-      else body=prFiles||[{filename:'services/api/index.py',status:'modified',additions:4,deletions:1},
+      else if(prPages){
+        const page=Number(new URL(url).searchParams.get('page'));
+        body=prPages[page-1]||[];
+        if(page<prPages.length)
+          link='<https://api.github.com/repos/testowner/demo-city/pulls/25/files?per_page=100&page='+(page+1)+'>; rel="next"';
+      }else body=prFiles||[{filename:'services/api/index.py',status:'modified',additions:4,deletions:1},
                            {filename:'other/unmapped.py',status:'added',additions:9,deletions:0}];
     }
     else if(typeof url==='string'&&url.startsWith('https://api.github.com/repos/')){
@@ -101,7 +106,7 @@ function makeApp({authenticated=true,active=true,assistantResult=null,multipleIs
       else {active=true;body={id:'demo',graph:GRAPH};}
     }
     else body={error:'Unavailable'},code=404;
-    return {ok:code===200,status:code,headers:{get:key=>key==='Retry-After'?importFailure?.retryAfter||null:null},json:async()=>body};
+    return {ok:code===200,status:code,headers:{get:key=>key==='Link'?link:key==='Retry-After'?importFailure?.retryAfter||null:null},json:async()=>body};
   }
   let renderer;
   class Renderer{
@@ -1016,7 +1021,7 @@ test('PR impact reports a GitHub rate limit without inventing changed buildings'
   ui.el('prInput').value='25';
   await ui.el('prLoad').listeners.click();
   for(let i=0;i<5;i++)await new Promise(resolve=>setImmediate(resolve));
-  assert.match(ui.el('prStatus').textContent,/rate-limiting/);
+  assert.match(ui.el('prStatus').textContent,/rate-limited/);
   assert.equal(ui.el('prResults').children.length,0);
   assert.equal(ui.el('prOpenGithub').hidden,true);
   assert.deepEqual(Array.from(ui.renderer.prChangedNodes),[]);
@@ -1044,4 +1049,39 @@ test('canonical PR deep link imports public repository then previews changed fil
   assert.equal(ui.calls.filter(c=>c.url==='/api/my-repos'&&c.opts.method==='POST').length,1);
   assert.equal(ui.calls.filter(c=>c.url.includes('/pulls/25/files?')).length,1);
   assert.equal(ui.el('addRepoDialog').open,undefined);
+});
+
+test('inspecting PR from console creates shareable route; clearing returns to city URL',async()=>{
+ const ui=makeApp({active:true});await ui.boot();
+ ui.el('prImpactShortcut').listeners.click();
+ ui.el('prInput').value='25';
+ await ui.el('prLoad').listeners.click();
+ for(let i=0;i<5;i++)await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(ui.location.pathname,'/testowner/demo-city/pull/25');
+ assert.equal(ui.el('prMore').hidden,true);
+ ui.el('prClear').listeners.click();
+ assert.equal(ui.location.pathname,'/testowner/demo-city');
+ assert.deepEqual(Array.from(ui.renderer.prChangedNodes),[]);
+});
+
+test('additional PR pages are fetched only on user action and update city highlights',async()=>{
+ const first=Array.from({length:100},(_,i)=>({
+   filename:'other/new-'+i+'.py',status:'modified',additions:1,deletions:1
+ }));
+ const second=[{filename:'services/api/index.py',status:'modified',additions:3,deletions:1}];
+ const ui=makeApp({active:true,prPages:[first,second]});await ui.boot();
+ ui.el('prImpactShortcut').listeners.click();
+ ui.el('prInput').value='#25';
+ await ui.el('prLoad').listeners.click();
+ for(let i=0;i<5;i++)await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(ui.el('prResults').children.length,100);
+ assert.equal(ui.el('prMore').hidden,false);
+ assert.match(ui.el('prStatus').textContent,/MORE GITHUB FILES AVAILABLE/);
+ assert.equal(ui.calls.filter(c=>c.url.includes('/pulls/25/files?')).length,1);
+ await ui.el('prMore').listeners.click();
+ for(let i=0;i<5;i++)await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(ui.el('prResults').children.length,101);
+ assert.equal(ui.el('prMore').hidden,true);
+ assert.deepEqual(Array.from(ui.renderer.prChangedNodes),['api']);
+ assert.equal(ui.calls.filter(c=>c.url.includes('/pulls/25/files?')).length,2);
 });
