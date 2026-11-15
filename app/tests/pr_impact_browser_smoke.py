@@ -32,6 +32,7 @@ async def main():
                      "activeRepo":"demo","aiConfigured":False}
             errors=await verify(page,session,graph,"/testowner/demo-city")
             await page.add_script_tag(content=(ROOT/"app/static/pr-impact.js").read_text())
+            await page.add_script_tag(content=(ROOT/"app/static/pr-review.js").read_text())
             await page.evaluate("""({path})=>{
                 window.__PR_HTTP_CALLS__=[];
                 const existing=window.fetch;
@@ -54,6 +55,9 @@ async def main():
             await page.locator("#prResults .pr-file-row").first.wait_for(state="visible",timeout=9000)
             assert await page.locator("#prResults .pr-file-row").count()==2
             assert "1 UNMAPPED" in (await page.locator("#prStatus").inner_text())
+            assert await page.locator("#prReview").is_visible()
+            assert "changed buildings" in await page.locator("#prReviewOverview").inner_text()
+            assert await page.locator("#prCopyReview").is_visible()
             assert await page.locator("#prOpenGithub").get_attribute("href")==(
                 "https://github.com/testowner/demo-city/pull/31")
             assert page.url=="https://gitcity.test/testowner/demo-city/pull/31",page.url
@@ -92,6 +96,8 @@ async def main():
             assert await page.evaluate("window.__MORE_PAGE_CALLS__")==[1,2]
             assert await page.locator("#prMore").is_hidden()
             assert "1 FILE MATCH" in (await page.locator("#prStatus").inner_text())
+            assert await page.locator("#prReview").is_visible()
+            assert await page.locator("#prReviewSections .pr-review-section").count()==4
             await page.locator("#prResults button.pr-file-row").click()
             await page.locator("#inspector").wait_for(state="visible",timeout=9000)
             assert not await page.evaluate("document.documentElement.scrollWidth>innerWidth")

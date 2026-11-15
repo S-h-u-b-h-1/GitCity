@@ -34,6 +34,7 @@ jobs:
           node --check app/static/investigation-notes.js
           node --check app/static/offline-city.js
           node --check app/static/pr-impact.js
+          node --check app/static/pr-review.js
       - name: Frontend interaction and renderer tests
         run: node --test app/tests/*.cjs
       - name: Static launch page tests

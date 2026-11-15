@@ -34,6 +34,7 @@ async def verify(width,height):
     for tag in ('<link rel="stylesheet" href="/static/styles.css">',
                 '<script defer src="/static/world.js"></script>',
                 '<script defer src="/static/pr-impact.js"></script>',
+                '<script defer src="/static/pr-review.js"></script>',
                 '<script defer src="/static/app.js"></script>'):
         html=html.replace(tag,'')
     css=(ROOT/'app/static/styles.css').read_text()

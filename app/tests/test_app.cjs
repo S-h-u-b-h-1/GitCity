@@ -9,6 +9,7 @@ const browserIssueSource=fs.readFileSync(path.join(__dirname,'../static/browser-
 const issueNotesSource=fs.readFileSync(path.join(__dirname,'../static/investigation-notes.js'),'utf8');
 const offlineCitySource=fs.readFileSync(path.join(__dirname,'../static/offline-city.js'),'utf8');
 const pullImpactSource=fs.readFileSync(path.join(__dirname,'../static/pr-impact.js'),'utf8');
+const pullReviewSource=fs.readFileSync(path.join(__dirname,'../static/pr-review.js'),'utf8');
 const GRAPH={name:'Demo City',owner:'testowner',branch:'main',source:'github',url:'https://github.com/testowner/demo-city',
   nodes:[{id:'web',name:'Web',kind:'frontend',path:'apps/web',fileCount:6,files:['apps/web/index.ts'],description:'Website'},
     {id:'api',name:'API',kind:'api',path:'services/api',fileCount:5,files:['services/api/index.py'],description:'API service'}],
@@ -123,6 +124,7 @@ function makeApp({authenticated=true,active=true,assistantResult=null,multipleIs
     setTraffic(v){this.traffic=v;}
     setImpactTrace(trace){this.trace=trace;}
     setPullChangedNodes(ids){this.prChangedNodes=ids;}
+    setPullReviewPlan(plan){this.prReviewPlan=plan;}
     resetCamera(){this.reset=true;}
   }
   const copied=[];
@@ -152,6 +154,7 @@ function makeApp({authenticated=true,active=true,assistantResult=null,multipleIs
   vm.runInNewContext(issueNotesSource,sandbox);
   vm.runInNewContext(offlineCitySource,sandbox);
   vm.runInNewContext(pullImpactSource,sandbox);
+  vm.runInNewContext(pullReviewSource,sandbox);
   vm.runInNewContext(source,sandbox);
   const flush=()=>new Promise(resolve=>setImmediate(resolve));
   async function boot(){document.onload();for(let i=0;i<4;i++)await flush();}
@@ -1083,5 +1086,51 @@ test('additional PR pages are fetched only on user action and update city highli
  assert.equal(ui.el('prResults').children.length,101);
  assert.equal(ui.el('prMore').hidden,true);
  assert.deepEqual(Array.from(ui.renderer.prChangedNodes),['api']);
+ assert.equal(ui.calls.filter(c=>c.url.includes('/pulls/25/files?')).length,2);
+});
+
+
+test('PR Review Map shows changed module, sampled direct importer and no invented test recommendations',async()=>{
+ const ui=makeApp({active:true});await ui.boot();
+ ui.el('prImpactShortcut').listeners.click();
+ ui.el('prInput').value='25';
+ await ui.el('prLoad').listeners.click();
+ for(let i=0;i<5;i++)await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(ui.el('prReview').hidden,false);
+ assert.match(ui.el('prReviewOverview').textContent,/1 changed buildings/);
+ assert.match(ui.el('prReviewOverview').textContent,/1 direct importer/);
+ assert.match(ui.el('prReviewOverview').textContent,/0 linked test locations/);
+ assert.deepEqual(Array.from(ui.renderer.prReviewPlan.directImporters.map(x=>x.nodeId)),['web']);
+ assert.equal(ui.el('prReviewSections').children.length,4);
+ assert.equal(ui.el('prReviewSections').children[0].children[1].dataset.reviewKind,'changed');
+ assert.equal(ui.el('prReviewSections').children[1].children[1].dataset.reviewKind,'direct');
+ const before=ui.calls.length;
+ await ui.el('prCopyReview').listeners.click();
+ assert.equal(ui.calls.length,before,'Review export is browser-local and read-only');
+ assert.equal(ui.copied.length,1);
+ assert.match(ui.copied[0],/GitCity PR #25/);
+ assert.match(ui.copied[0],/src|apps\/web|services\/api/);
+ assert.match(ui.copied[0],/No linked test module observed/);
+ assert.match(ui.copied[0],/run relevant tests manually/);
+ ui.el('prClear').listeners.click();
+ assert.equal(ui.el('prReview').hidden,true);
+ assert.equal(ui.renderer.prReviewPlan,null);
+});
+
+test('PR Review Map re-evaluates linked modules after another PR page loads',async()=>{
+ const first=Array.from({length:100},(_,i)=>({filename:'other/no-index-'+i+'.ts',
+   status:'modified',additions:1,deletions:0}));
+ const second=[{filename:'services/api/index.py',status:'modified',additions:1,deletions:0}];
+ const ui=makeApp({active:true,prPages:[first,second]});await ui.boot();
+ ui.el('prImpactShortcut').listeners.click();ui.el('prInput').value='25';
+ await ui.el('prLoad').listeners.click();
+ for(let i=0;i<5;i++)await new Promise(resolve=>setImmediate(resolve));
+ assert.match(ui.el('prReviewOverview').textContent,/0 changed buildings/);
+ assert.match(ui.el('prReviewOverview').textContent,/PARTIAL PREVIEW/);
+ await ui.el('prMore').listeners.click();
+ for(let i=0;i<5;i++)await new Promise(resolve=>setImmediate(resolve));
+ assert.match(ui.el('prReviewOverview').textContent,/1 changed buildings/);
+ assert.match(ui.el('prReviewOverview').textContent,/1 direct importer/);
+ assert.equal(ui.renderer.prReviewPlan.changedModules[0].nodeId,'api');
  assert.equal(ui.calls.filter(c=>c.url.includes('/pulls/25/files?')).length,2);
 });
