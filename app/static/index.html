@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#061021">
-  <meta name="description" content="RepoWorld turns public GitHub repositories into beautifully explorable cities of code.">
-  <title>RepoWorld — A city for every codebase</title>
+  <meta name="description" content="GitCity turns public GitHub repositories into beautifully explorable cities of code.">
+  <title>GitCity — A city for every codebase</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/static/styles.css">
   <script defer src="/static/world.js"></script>
@@ -15,7 +15,7 @@
   <script defer src="/static/app.js"></script>
 </head>
 <body>
-  <div id="loadingView" class="startup-screen"><span class="logo-symbol" aria-hidden="true"><i></i><i></i><i></i></span><span class="loading-word">RepoWorld</span></div>
+  <div id="loadingView" class="startup-screen"><span class="logo-symbol" aria-hidden="true"><i></i><i></i><i></i></span><span class="loading-word">GitCity</span></div>
 
   <main id="workspace" class="workspace" hidden>
     <div class="world-ambient" aria-hidden="true"></div>
@@ -32,8 +32,8 @@
         <span class="city-header-divider"></span>
         <div class="repo-menu-wrap" id="repoMenuWrap">
           <button type="button" class="repo-title-button" id="repoMenuButton" aria-haspopup="true" aria-expanded="false" aria-controls="repoMenu">
-            <span class="repo-caption">REPOWORLD <span class="slash">/</span> YOUR CITY</span>
-            <span class="repo-title-line"><strong id="activeRepoTitle">RepoWorld</strong><svg width="14" height="14" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="m5 8 5 5 5-5" stroke="currentColor" stroke-width="1.7"/></svg></span>
+            <span class="repo-caption">GITCITY <span class="slash">/</span> YOUR CITY</span>
+            <span class="repo-title-line"><strong id="activeRepoTitle">GitCity</strong><svg width="14" height="14" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="m5 8 5 5 5-5" stroke="currentColor" stroke-width="1.7"/></svg></span>
           </button>
           <div class="popover repo-menu" id="repoMenu" hidden>
             <div class="popover-heading">YOUR REPOSITORIES</div>
@@ -65,11 +65,11 @@
       <button type="button" class="recent-repo-action" id="openOfflineCity" hidden>Open saved map offline <strong id="offlineRepoName"></strong> <span aria-hidden="true">↗</span></button>
       <p class="recent-repo-help" id="offlineRepoHelp" hidden>Opt-in browser backup: view stored public buildings and paths without live GitHub, Issue Radar or AI. Re-import to reconnect.</p>
       <button type="button" class="recent-repo-action" id="restoreOfflineCityEmpty">Restore city from a file <span aria-hidden="true">↗</span></button>
-      <p class="recent-repo-help">Portable backups are browser-only public maps. Files are not uploaded to RepoWorld.</p>
+      <p class="recent-repo-help">Portable backups are browser-only public maps. Files are not uploaded to GitCity.</p>
       <div class="empty-assurance">NO ACCOUNT REQUIRED <span>·</span> PUBLIC REPOSITORIES ONLY <span>·</span> READ-ONLY IMPORT</div>
     </section>
 
-    <input type="file" id="offlineCityFile" accept=".json,application/json" aria-label="Select a RepoWorld public-city JSON file" hidden>
+    <input type="file" id="offlineCityFile" accept=".json,application/json" aria-label="Select a GitCity public-city JSON file" hidden>
     <div class="world-status" id="worldStatus" role="status" aria-live="polite" hidden><span class="status-light"></span><span id="cityStatusText">CITY READY</span><span class="status-divider"></span><span id="cityStatusCounts"></span></div>
     <div class="city-hint" id="cityHint" hidden>DRAG TO ORBIT <span>·</span> SELECT A BUILDING TO INSPECT</div>
     <button type="button" class="issue-map-legend" id="issueMapLegend" hidden aria-label="Browse open GitHub issues for this repository" title="Browse issues and locate their suggested buildings"><i class="issue-legend-gold" aria-hidden="true"></i><span id="issueMapCount">OPEN ISSUES</span><span class="issue-legend-divider">·</span><i class="issue-legend-outline" aria-hidden="true">?</i><span>SUGGESTED LOCATIONS</span><span class="issue-legend-arrow" aria-hidden="true">↗</span></button>
@@ -135,7 +135,7 @@
         </details>
         <a id="issueGithubLink" class="issue-github-link" href="https://github.com" target="_blank" rel="noopener noreferrer">Read full issue on GitHub <span aria-hidden="true">↗</span></a>
         <div class="issue-ai-card">
-          <div class="issue-ai-heading"><span class="issue-ai-icon">✳</span> <span id="issueAiHeading">REPOWORLD DEVELOPER GUIDE</span></div>
+          <div class="issue-ai-heading"><span class="issue-ai-icon">✳</span> <span id="issueAiHeading">GITCITY DEVELOPER GUIDE</span></div>
           <div id="issueAiResult" class="issue-ai-result" aria-live="polite">Choose an issue to understand likely code locations.</div>
           <div class="issue-ai-actions"><button type="button" id="issueFollowUp" class="issue-follow-up" hidden>Ask a follow-up <span aria-hidden="true">↗</span></button><button type="button" id="issueInspectSource" class="issue-inspect-source" hidden>Inspect public source <span aria-hidden="true">↗</span></button><button type="button" id="issueCopyNotes" class="issue-copy-notes">Copy investigation notes <span aria-hidden="true">⧉</span></button><button type="button" id="issueRetry" class="issue-retry" hidden>Try again ↻</button></div>
         </div>
@@ -170,7 +170,7 @@
 
   <dialog id="searchDialog" class="dialog-shell search-dialog">
     <form id="searchForm" class="dialog-inner">
-      <div class="modal-topline"><span>RepoWorld <span class="modal-num">/ Developer console</span></span><button type="button" id="closeSearch" class="close-icon" aria-label="Close developer console">×</button></div>
+      <div class="modal-topline"><span>GitCity <span class="modal-num">/ Developer console</span></span><button type="button" id="closeSearch" class="close-icon" aria-label="Close developer console">×</button></div>
       <div class="compass-tabs" role="group" aria-label="Explore code tools">
         <button type="button" data-compass-tab="ask" class="active" aria-pressed="true">Assistant</button>
         <button type="button" data-compass-tab="issues" aria-pressed="false">Open issues <span id="issuesTabCount" hidden></span></button>
@@ -179,7 +179,7 @@
       <div class="compass-shortcuts compass-map-entry"><button type="button" id="showMapOptions" aria-label="Open city map controls">City controls <span aria-hidden="true">↗</span></button></div>
       <div id="findTab" hidden>
       <h2>Find code</h2>
-      <p class="compass-intro">Describe a feature or search a file path. RepoWorld will point to likely code—not guess at unseen source.</p>
+      <p class="compass-intro">Describe a feature or search a file path. GitCity will point to likely code—not guess at unseen source.</p>
       <label for="searchInput">File, feature or symbol</label>
       <input class="search-input" type="search" id="searchInput" autocomplete="off" autocapitalize="off" maxlength="160" placeholder="Where is login handled?" aria-describedby="searchScope">
       <div id="searchWelcome" class="search-welcome">

@@ -1,4 +1,4 @@
-/* RepoWorld v0.9.15: minimal city, source-scoped issue guide, and shareable public-repository entry points. */
+/* GitCity v0.9.15: minimal city, source-scoped issue guide, and shareable public-repository entry points. */
 (function(){
   'use strict';
   const $=id=>document.getElementById(id);
@@ -124,7 +124,7 @@
       const utility=window.RepoWorldOfflineCity;
       if(!utility||typeof file.size!=='number'||file.size<20||
           file.size>utility.maxFileBytes)
-        throw Error('Select a RepoWorld public-city JSON file within the 5 MB limit.');
+        throw Error('Select a GitCity public-city JSON file within the 5 MB limit.');
       const text=await file.text();
       const preview=utility.importText(text);
       const existing=readOfflineBackup();
@@ -144,7 +144,7 @@
       toast('Browser storage is blocked; the backup could not be cleared.',true);return;
     }
     closePopovers();
-    if(state.offline){state.activeId=null;showEmpty();document.title='RepoWorld — A city for every codebase';}
+    if(state.offline){state.activeId=null;showEmpty();document.title='GitCity — A city for every codebase';}
     else renderRepos();
     toast('Browser-only city backup cleared.');
   }
@@ -161,7 +161,7 @@
     $('mapCommandTrigger').hidden=true;$('mapTools').hidden=true;$('cityHint').hidden=true;$('worldStatus').hidden=true;
     $('inspector').hidden=true;$('tourPanel').hidden=true;$('issueDrawer').hidden=true;$('issueMapLegend').hidden=true;state.issueInsightRevision++;
     state.radar=null;state.radarError=null;state.radarRevision++;state.renderer?.setIssueMarkers?.({});
-    setText('activeRepoTitle','RepoWorld');renderRepos();
+    setText('activeRepoTitle','GitCity');renderRepos();
     const recent=lastPublicRepo();
     $('reimportRecent').hidden=!recent;$('recentRepoHelp').hidden=!recent;
     setText('recentRepoName',recent||'');
@@ -228,7 +228,7 @@
     setText('cityStatusText',state.offline?'LOCAL OFFLINE PREVIEW · SAVED MAP':
       graph.source==='demo'?'DEMO CITY':'PUBLIC GITHUB SNAPSHOT');
     setText('cityStatusCounts',`${new Set(graph.nodes.map(n=>n.kind)).size} DISTRICTS  ·  ${graph.nodes.length} BUILDINGS`);
-    document.title=`${graph.name} — RepoWorld`;
+    document.title=`${graph.name} — GitCity`;
     setLayer('structure');renderRepos();state.renderer.setIssueMarkers?.({});
     if(state.offline){
       state.radarError='Offline map preview; live GitHub issues require re-import.';
@@ -307,7 +307,7 @@
     }catch{
       // Clipboard access may be denied on non-HTTPS previews. Give an explicit
       // copyable fallback rather than claiming to have copied the link.
-      if(typeof window.prompt==='function')window.prompt('Copy your public RepoWorld link:',url);
+      if(typeof window.prompt==='function')window.prompt('Copy your public GitCity link:',url);
       else toast('Clipboard is unavailable in this browser.',true);
     }
   }
@@ -515,7 +515,7 @@
   }
   function assistantBubble(role,text){
     const box=document.createElement('div');box.className='chat-bubble '+role;
-    if(role==='assistant'){const kicker=document.createElement('div');kicker.className='bubble-label';kicker.textContent='REPOWORLD GUIDE';box.append(kicker);}
+    if(role==='assistant'){const kicker=document.createElement('div');kicker.className='bubble-label';kicker.textContent='GITCITY GUIDE';box.append(kicker);}
     const content=document.createElement('p');content.textContent=text;box.append(content);
     $('assistantThread').append(box);$('assistantThread').scrollTop=$('assistantThread').scrollHeight;
     return box;
@@ -770,7 +770,7 @@
       state.issueNotesResult=null;
       $('issueRetry').hidden=true;$('issueFollowUp').hidden=false;
       setText('issueAiHeading','BROWSER GITHUB FEED · UNVERIFIED');
-      setText('issueAiResult','This issue report was fetched directly by your browser and was not independently checked by RepoWorld. You can inspect public repository source separately using the button below, without claiming the issue is confirmed or calling BharatCode.');
+      setText('issueAiResult','This issue report was fetched directly by your browser and was not independently checked by GitCity. You can inspect public repository source separately using the button below, without claiming the issue is confirmed or calling BharatCode.');
       return;
     }
     const repoId=state.activeId,number=issue.number,key=`${repoId}:${number}:${nodeId||''}`,serial=++state.issueInsightRevision;

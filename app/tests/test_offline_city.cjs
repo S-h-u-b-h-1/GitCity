@@ -92,7 +92,7 @@ test('portable public city file roundtrips into a new browser with no server dat
   const transferred=u.restoreText(text,second);
   assert.equal(transferred.graph.nodes[0].id,'zulipterminal/ui_tools');
   assert.equal(u.read(second).graph.nodes[0].files[1],'zulipterminal/ui_tools/messages.py');
-  assert.equal(u.fileName(transferred.graph),'repoworld-zulip-zulip-terminal.json');
+  assert.equal(u.fileName(transferred.graph),'gitcity-zulip-zulip-terminal.json');
   assert.deepEqual(Array.from(first.map.keys()),Array.from(second.map.keys()));
 });
 test('file restore rejects malformed, forged, oversized and misleading snapshots',()=>{

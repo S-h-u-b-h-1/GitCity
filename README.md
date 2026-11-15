@@ -1,8 +1,23 @@
+# GitCity — The City of Code
+
+**Formerly RepoWorld.** The existing application, commit history, public city file format, and BharatCode submission provenance are preserved.
+
+**Vercel frontend:** https://gitcity-one.vercel.app · **Source:** https://github.com/S-h-u-b-h-1/GitCity · **Existing API:** https://repoworld-3b9e.onrender.com
+
+GitCity turns public GitHub repositories into interactive 3D code cities, with static import links, Issue Radar, source-scoped developer guidance, and optional BharatCode inference. Vercel serves the interface as a static site and proxies `/api/*` to the current Render FastAPI service. This migration improves frontend delivery, but the Render Free backend can still sleep and lose temporary SQLite data. Exported public city JSON files remain readable because their versioned format is unchanged.
+
+The legacy release notes below document previous RepoWorld versions; historical hosting and competition references are intentionally retained.
+
+---
+
+## Legacy v0.9.15 release notes
+
 # RepoWorld v0.9.15 — The City of Code
+
 
 ### 🏆 BharatCode Build League 2026 — submitted entry
 
-**[🚀 Try RepoWorld](https://repoworld-launch.onrender.com)** · **[🗳️ Find RepoWorld and vote on BharatCode](https://bharatcode.ai/hackathon#projects)** · **[⭐ Star the open-source repository](https://github.com/S-h-u-b-h-1/RepoWorld)**
+**[🚀 Try RepoWorld](https://repoworld-launch.onrender.com)** · **[🗳️ Find RepoWorld and vote on BharatCode](https://bharatcode.ai/hackathon#projects)** · **[⭐ Star the open-source repository](https://github.com/S-h-u-b-h-1/GitCity)**
 
 Turn an unfamiliar public GitHub repository into an explorable **3D code city**. Inspect real module paths and sampled static imports, use **Find Code**, and investigate **open GitHub issues** with clearly qualified source-location hints. An optional **BharatCode-powered assistant** provides source-scoped guidance when inference is available; any fallback is explicitly labeled.
 
@@ -12,7 +27,7 @@ Turn an unfamiliar public GitHub repository into an explorable **3D code city**.
 
 **RepoWorld is a read-only, sign-in-free tool for exploring public GitHub repositories as interactive 3D cities.** Districts are groups of source files; buildings represent modules; illuminated links represent sampled **static imports**, not runtime traffic. Issue Radar displays GitHub's reported open issues as referenced, suggested, or unplaced locations. An optional BharatCode assistant helps developers investigate code and plan safe next steps.
 
-**Status:** Public source: https://github.com/S-h-u-b-h-1/RepoWorld. Free hosted site: https://repoworld-3b9e.onrender.com. RepoWorld is publicly listed in the BharatCode Build League 2026 Projects section. The visual/navigation improvements have CI and mocked-browser tests; actual public-host and GitHub API behavior must still be verified after deployment. The optional BharatCode provider can time out and its labeled fallback is not a completed AI generation.
+**Status:** Public source: https://github.com/S-h-u-b-h-1/GitCity. Free hosted site: https://repoworld-3b9e.onrender.com. RepoWorld is publicly listed in the BharatCode Build League 2026 Projects section. The visual/navigation improvements have CI and mocked-browser tests; actual public-host and GitHub API behavior must still be verified after deployment. The optional BharatCode provider can time out and its labeled fallback is not a completed AI generation.
 
 ## Fast free launch page (static CDN)
 

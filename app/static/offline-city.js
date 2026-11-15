@@ -1,4 +1,4 @@
-/* Explicit, browser-only backup of a public RepoWorld city map (no API). */
+/* Explicit, browser-only backup of a public GitCity map (no API). */
 (function(){
   'use strict';
   const KEY='repoworld:offline-city:v1';
@@ -118,7 +118,7 @@
   function fileName(graph){
     const safe=extract(graph);
     const repo=new URL(safe.url).pathname.split('/').filter(Boolean);
-    return 'repoworld-'+repo.join('-').replace(/[^a-zA-Z0-9_.-]/g,'-')+'.json';
+    return 'gitcity-'+repo.join('-').replace(/[^a-zA-Z0-9_.-]/g,'-')+'.json';
   }
   function clear(storage){
     try{storage?.removeItem?.(KEY);return true;}catch{return false;}
