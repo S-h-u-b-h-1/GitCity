@@ -91,12 +91,12 @@ def reserve_ai(user_id: str, ip: str) -> None:
 
 def reserve_import(user_id: str, ip: str) -> None:
     budgets=[
-        Budget('Import global hourly','global',3600, _env_int('REPOWORLD_IMPORT_GLOBAL_HOURLY', 100)),
-        Budget('Import browser hourly',user_id,3600, _env_int('REPOWORLD_IMPORT_GUEST_HOURLY', 30)),
+        Budget('Import global hourly','global',3600, _env_int('REPOWORLD_IMPORT_GLOBAL_HOURLY', 300)),
+        Budget('Import browser hourly',user_id,3600, _env_int('REPOWORLD_IMPORT_GUEST_HOURLY', 100)),
         # Shorter fixed windows stop import storms without penalizing cached
         # city views, which never reach reserve_import.
-        Budget('Import global 5-minute','global',300, _env_int('REPOWORLD_IMPORT_GLOBAL_5MIN', 12)),
-        Budget('Import browser 5-minute',user_id,300, _env_int('REPOWORLD_IMPORT_GUEST_5MIN', 8)),
+        Budget('Import global 5-minute','global',300, _env_int('REPOWORLD_IMPORT_GLOBAL_5MIN', 30)),
+        Budget('Import browser 5-minute',user_id,300, _env_int('REPOWORLD_IMPORT_GUEST_5MIN', 15)),
     ]
     if os.getenv('REPOWORLD_ENABLE_IP_BUDGET') == '1':
         budgets.append(Budget('Import network hourly',ip,3600, _env_int('REPOWORLD_IMPORT_IP_HOURLY', 8)))

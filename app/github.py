@@ -9,13 +9,16 @@ from __future__ import annotations
 import asyncio
 import base64
 import copy
+import json
 import os
+import sqlite3
 import re
 import time
 from urllib.parse import quote, urlsplit
 
 import httpx
 
+from .auth import _database
 from .graph import (MAX_ANALYZED_SOURCES, MAX_SOURCE_BYTES, build_graph,
                     group_for_file, source_priority)
 
@@ -23,6 +26,9 @@ GH_API = "https://api.github.com"
 _GRAPH_CACHE: dict[str, tuple[float, dict]] = {}
 GRAPH_TTL_SECONDS = 480
 GRAPH_CACHE_MAX_ENTRIES = 24
+PUBLIC_CITY_CACHE_TTL_SECONDS = 12 * 3600
+PUBLIC_CITY_CACHE_MAX_ENTRIES = 128
+PUBLIC_CITY_CACHE_MAX_GRAPH_BYTES = 500_000
 OWNER_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$")
 REPO_RE = re.compile(r"^[A-Za-z0-9_.-]{1,100}$")
 # Github's unauthenticated API allowance is 60 calls / hour per origin IP.
@@ -33,47 +39,100 @@ SOURCE_FETCH_CONCURRENCY = 3
 SOURCE_FETCH_BUDGET_SECONDS = 21
 
 
-def cached_public_graph(owner: str, repo: str) -> dict | None:
-    """An immutable copy of a recently fetched *public* repository snapshot.
-
-    Only server-fetched graphs may enter this cache; do not accept browser
-    snapshots as cache entries. Results may lag GitHub by up to eight minutes.
-    """
-    key = (owner + '/' + repo).lower()
-    entry = _GRAPH_CACHE.get(key)
-    if not entry:
-        return None
-    age = time.monotonic() - entry[0]
-    if age < 0 or age >= GRAPH_TTL_SECONDS:
-        _GRAPH_CACHE.pop(key, None)
-        return None
-    graph = entry[1]
-    if graph.get('source') != 'github':
-        return None
+def _verified_public_graph(graph: object, key: str) -> bool:
+    """Only serve the public GitHub graph for its exact canonical owner/repo."""
+    if not isinstance(graph, dict) or graph.get('source') != 'github':
+        return False
+    if not isinstance(graph.get('nodes'), list) or not graph['nodes']:
+        return False
     try:
         actual_owner, actual_repo = parse_repository(graph['url'])
     except (RepoError, KeyError, TypeError):
+        return False
+    return (actual_owner + '/' + actual_repo).lower() == key
+
+
+def _remember_public_graph(key: str, graph: dict) -> None:
+    if key not in _GRAPH_CACHE and len(_GRAPH_CACHE) >= GRAPH_CACHE_MAX_ENTRIES:
+        oldest = min(_GRAPH_CACHE, key=lambda entry: _GRAPH_CACHE[entry][0])
+        _GRAPH_CACHE.pop(oldest, None)
+    _GRAPH_CACHE[key] = (time.monotonic(), copy.deepcopy(graph))
+
+
+def _shared_public_graph(owner: str, repo: str) -> dict | None:
+    """Best-effort 12-hour cache in the existing ephemeral SQLite volume."""
+    key = (owner + '/' + repo).lower()
+    try:
+        with _database() as db:
+            row = db.execute(
+                'SELECT graph_json, cached_at FROM public_city_cache WHERE repo_key=?',
+                (key,),
+            ).fetchone()
+            if row is None:
+                return None
+            age = int(time.time()) - int(row['cached_at'])
+            if age < 0 or age >= PUBLIC_CITY_CACHE_TTL_SECONDS:
+                db.execute('DELETE FROM public_city_cache WHERE repo_key=?', (key,))
+                return None
+            graph = json.loads(row['graph_json'])
+    except (sqlite3.Error, ValueError, TypeError, KeyError):
         return None
-    if (actual_owner + '/' + actual_repo).lower() != key:
+    if not _verified_public_graph(graph, key):
         return None
-    return copy.deepcopy(graph)
+    # Avoid suggesting stale code is a live, commit-pinned GitHub observation.
+    if age >= GRAPH_TTL_SECONDS:
+        warnings = graph.setdefault('warnings', [])
+        if isinstance(warnings, list):
+            warnings.append('Shared public city snapshot may be up to 12 hours old. Refresh to check updated GitHub code.')
+    return graph
+
+
+def _persist_public_graph(key: str, graph: dict) -> None:
+    """Store at most 128 public-only graphs, each <=500 KB, without guest data."""
+    try:
+        payload = json.dumps(graph, separators=(',', ':'), ensure_ascii=False)
+        if len(payload.encode('utf-8')) > PUBLIC_CITY_CACHE_MAX_GRAPH_BYTES:
+            return
+        now = int(time.time())
+        with _database() as db:
+            db.execute('DELETE FROM public_city_cache WHERE cached_at<?',
+                       (now - PUBLIC_CITY_CACHE_TTL_SECONDS,))
+            db.execute('''INSERT INTO public_city_cache (repo_key,graph_json,cached_at)
+                          VALUES (?,?,?) ON CONFLICT(repo_key) DO UPDATE SET
+                          graph_json=excluded.graph_json,cached_at=excluded.cached_at''',
+                       (key, payload, now))
+            db.execute('''DELETE FROM public_city_cache WHERE repo_key NOT IN
+                          (SELECT repo_key FROM public_city_cache
+                           ORDER BY cached_at DESC,repo_key DESC LIMIT ?)''',
+                       (PUBLIC_CITY_CACHE_MAX_ENTRIES,))
+    except (sqlite3.Error, ValueError, TypeError):
+        # A cache failure must not prevent an otherwise successful public import.
+        return
+
+
+def cached_public_graph(owner: str, repo: str) -> dict | None:
+    """Use private in-memory copies first, then shared public-only SQLite."""
+    key = (owner + '/' + repo).lower()
+    entry = _GRAPH_CACHE.get(key)
+    if entry is not None:
+        age = time.monotonic() - entry[0]
+        if 0 <= age < GRAPH_TTL_SECONDS and _verified_public_graph(entry[1], key):
+            return copy.deepcopy(entry[1])
+        _GRAPH_CACHE.pop(key, None)
+    persisted = _shared_public_graph(owner, repo)
+    if persisted is not None:
+        _remember_public_graph(key, persisted)
+        return copy.deepcopy(persisted)
+    return None
 
 
 def _cache_public_graph(owner: str, repo: str, graph: dict) -> None:
-    """Bound RAM use and keep cached public graphs isolated from callers."""
-    if not isinstance(graph, dict) or graph.get('source') != 'github':
-        return
-    try:
-        canonical = parse_repository(graph['url'])
-    except (RepoError, KeyError, TypeError):
-        return
+    """Only verified public GitHub imports enter the shared city cache."""
     key = (owner + '/' + repo).lower()
-    if (canonical[0] + '/' + canonical[1]).lower() != key:
+    if not _verified_public_graph(graph, key):
         return
-    if key not in _GRAPH_CACHE and len(_GRAPH_CACHE) >= GRAPH_CACHE_MAX_ENTRIES:
-        oldest = min(_GRAPH_CACHE, key=lambda k: _GRAPH_CACHE[k][0])
-        _GRAPH_CACHE.pop(oldest, None)
-    _GRAPH_CACHE[key] = (time.monotonic(), copy.deepcopy(graph))
+    _remember_public_graph(key, graph)
+    _persist_public_graph(key, graph)
 
 
 class RepoError(Exception):
