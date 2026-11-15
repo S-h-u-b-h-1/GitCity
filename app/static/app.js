@@ -26,11 +26,38 @@
     // Store one PUBLIC name, never source graphs, cookies, CSRF, or provider keys.
     try{window.localStorage?.setItem(LAST_PUBLIC_REPO_KEY,value);}catch{/* Storage can be disabled; imports still work. */}
   }
+  // GitCity URLs mirror GitHub owner/repo paths. Legacy ?repo= links still work.
+  // Paths are validated, never treated as a trigger for a background import.
   const deepLinkedRepo=()=>{
     try{
-      const value=new URLSearchParams(window.location?.search||'').get('repo')||'';
-      return validPublicRepo(value)?value:null;
+      const pathname=window.location?.pathname||'/';
+      const pathMatch=/^\/([A-Za-z0-9-]{1,39})\/([A-Za-z0-9_.-]{1,100})\/?$/.exec(pathname);
+      if(pathMatch){
+        const repo=pathMatch[1]+'/'+pathMatch[2];
+        return validPublicRepo(repo)?repo:null;
+      }
+      if(pathname!=='/')return null;
+      const legacy=new URLSearchParams(window.location?.search||'').get('repo')||'';
+      return validPublicRepo(legacy)?legacy:null;
     }catch{return null;}
+  };
+  const repositoryPath=repo=>validPublicRepo(repo)?'/'+repo.split('/').map(encodeURIComponent).join('/'):null;
+  const publicRepoFromGraph=graph=>{
+    if(graph?.source!=='github')return null;
+    try{
+      const url=new URL(graph.url);
+      if(url.origin!=='https://github.com'||url.search||url.hash||url.username||url.password)return null;
+      const repo=url.pathname.replace(/^\/+|\/+$/g,'');
+      return validPublicRepo(repo)?repo:null;
+    }catch{return null;}
+  };
+  const syncRepositoryPath=graph=>{
+    const repo=publicRepoFromGraph(graph);
+    const path=repositoryPath(repo);
+    if(!path||!window.history?.replaceState)return;
+    const current=window.location;
+    if(current?.pathname===path&&!current.search&&!current.hash)return;
+    try{window.history.replaceState(null,'',path);}catch{/* A locked-down browser may deny history changes. */}
   };
   const kindLabel=k=>TYPES[k]?.name||names[k]||'Core Nexus';
   const setText=(id,value)=>{if($(id))$(id).textContent=esc(value);};
@@ -229,6 +256,7 @@
       graph.source==='demo'?'DEMO CITY':'PUBLIC GITHUB SNAPSHOT');
     setText('cityStatusCounts',`${new Set(graph.nodes.map(n=>n.kind)).size} DISTRICTS  ·  ${graph.nodes.length} BUILDINGS`);
     document.title=`${graph.name} — GitCity`;
+    syncRepositoryPath(graph);
     setLayer('structure');renderRepos();state.renderer.setIssueMarkers?.({});
     if(state.offline){
       state.radarError='Offline map preview; live GitHub issues require re-import.';
@@ -291,13 +319,12 @@
   }
   async function copyCityLink(){
     if(state.graph?.source!=='github')return;
-    const repo=state.offline?state.graph.url.replace('https://github.com/',''):
-      state.repos.find(item=>item.id===state.activeId)?.fullName||`${state.graph.owner||''}/${state.graph.name||''}`;
-    if(!PUBLIC_REPO.test(repo)){toast('This city cannot be shared as a public GitHub link.',true);return;}
-    const current=window.location;
-    const origin=current?.origin, pathname=current?.pathname||'/';
+    const repo=publicRepoFromGraph(state.graph);
+    const path=repositoryPath(repo);
+    if(!path){toast('This city cannot be shared as a public GitHub link.',true);return;}
+    const origin=window.location?.origin;
     if(!origin||!/^https?:\/\//.test(origin)){toast('This page has no shareable web address.',true);return;}
-    const url=`${origin}${pathname}?repo=${encodeURIComponent(repo)}`;
+    const url=`${origin}${path}`;
     closePopovers();
     try{
       if(!window.navigator?.clipboard?.writeText)throw Error('Clipboard is unavailable');
