@@ -1,4 +1,4 @@
-RepoWorld — The City of Code
+RepoWorld — The City of Code (original BharatCode submission; now GitCity)
 BharatCode Build League 2026 | Category: Coding & Developer Tools
 Creator: Shubhaang Kataruka
 
@@ -8,7 +8,7 @@ find relevant modules, and investigate open-source issues with source-aware,
 optional BharatCode-powered assistance.
 
 TRY THE WORKING PROJECT
-Source code: https://github.com/S-h-u-b-h-1/RepoWorld
+Source code: https://github.com/S-h-u-b-h-1/GitCity
 Free startup-friendly launcher: https://repoworld-launch.onrender.com
 Live application: https://repoworld-3b9e.onrender.com
 Example public repository: https://github.com/zulip/zulip-terminal
@@ -71,7 +71,7 @@ linked source and relevant project tests. Anonymous access is protected with
 per-browser and global budgets, but a public launch also requires hosting-level
 abuse protection.
 
-Repository source URL: https://github.com/S-h-u-b-h-1/RepoWorld
+Repository source URL: https://github.com/S-h-u-b-h-1/GitCity
 Fast launch URL: https://repoworld-launch.onrender.com (Render Free static CDN; displays real backend wake-up state).
 Live application URL: https://repoworld-3b9e.onrender.com (Render Free; idle cold starts, ephemeral browser workspaces).
 Hackathon page: https://bharatcode.ai/hackathon

@@ -533,3 +533,8 @@
 @media(prefers-reduced-motion:reduce){
   #searchDialog :is(button,input,textarea,select){transition:none!important}
 }
+
+/* GitCity: keep honest, accessible feedback visible while the free API starts. */
+.startup-screen{flex-direction:column;gap:16px}
+.startup-screen .loading-brand{display:flex;align-items:center;justify-content:center;gap:16px}
+.startup-screen .loading-hint{max-width:370px;margin:0;padding:0 22px;text-align:center;font-size:12px;line-height:1.65;font-weight:400;letter-spacing:0;color:#9db5d0}
