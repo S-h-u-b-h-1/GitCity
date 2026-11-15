@@ -21,7 +21,9 @@ async def test_production_readiness_refuses_missing_credentials(monkeypatch,tmp_
 
 
 @pytest.mark.asyncio
-async def test_repository_cache_avoids_repeated_github_reads_and_refresh_bypasses(monkeypatch):
+async def test_repository_cache_avoids_repeated_github_reads_and_refresh_bypasses(monkeypatch,tmp_path):
+    # A disk-backed public cache must not reuse snapshots from another test run.
+    monkeypatch.setenv('REPOWORLD_DB_PATH',str(tmp_path/'cache.sqlite3'))
     github._GRAPH_CACHE.clear()
     calls=[]
     content=b'export const hello = 1;'
@@ -50,7 +52,8 @@ async def test_repository_cache_avoids_repeated_github_reads_and_refresh_bypasse
     github._GRAPH_CACHE.clear()
 
 @pytest.mark.asyncio
-async def test_cached_import_is_refused_if_repository_becomes_private(monkeypatch):
+async def test_cached_import_is_refused_if_repository_becomes_private(monkeypatch,tmp_path):
+    monkeypatch.setenv('REPOWORLD_DB_PATH',str(tmp_path/'private.sqlite3'))
     github._GRAPH_CACHE.clear()
     state={'private':False}
     content=b'export const safe = true;'
