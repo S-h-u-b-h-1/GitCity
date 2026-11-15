@@ -7,7 +7,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-REPO="https://github.com/S-h-u-b-h-1/RepoWorld"
+REPO="https://github.com/S-h-u-b-h-1/GitCity"
 EVENT="https://bharatcode.ai/hackathon"
 REQUIRED=("README.md","BharatCode.txt","LICENSE","render.yaml","app/ai.py",
           "app/main.py","app/static/index.html","app/static/app.js")
