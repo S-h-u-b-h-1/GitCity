@@ -266,7 +266,12 @@ async def import_my_repo(request: Request, payload: ImportRequest):
                         from .github import _remember_public_graph
                         _remember_public_graph(key, graph)
                     cached = graph is not None
-                if not cached:
+                if cached:
+                    # Never share an older map after its public source status
+                    # becomes private, deleted or temporarily unverifiable.
+                    from .public_visibility import require_current_public
+                    await require_current_public(owner, repo)
+                else:
                     async with _expensive_import_slot():
                         _limit(request, f"import:{uid}", count=30)
                         reserve_import(uid, request.client.host if request.client else "unknown")

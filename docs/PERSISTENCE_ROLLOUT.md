@@ -47,9 +47,13 @@ access private repositories.
   avoid imposing repeated connection timeouts.
 - The cache is **not a live GitHub visibility check**. Repo visibility,
   deletions and code revisions may change during the retention window.
-  Until public-visibility revalidation is implemented and verified, enable
-  this option only if serving last-known-public module metadata for up to
-  12 hours is acceptable. Treat names and paths as potentially stale.
+    The shared-cache import path now uses a lightweight GitHub codeload HEAD
+  visibility proof (positive proof reused for 90 seconds). A 404 or provider
+  error prevents a stale shared snapshot from being newly assigned to a visitor.
+  This **does not give instant revocation** during the 90-second proof window,
+  and already-imported guest browser workspaces remain independent snapshots.
+  Operators with stricter requirements should shorten retention or disable
+  shared caching until authenticated entitlement checks are available. Treat names and paths as potentially stale.
 
 ## Repeatable checks
 
