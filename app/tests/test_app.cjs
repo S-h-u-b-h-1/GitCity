@@ -1021,7 +1021,7 @@ test('PR impact reports a GitHub rate limit without inventing changed buildings'
   ui.el('prInput').value='25';
   await ui.el('prLoad').listeners.click();
   for(let i=0;i<5;i++)await new Promise(resolve=>setImmediate(resolve));
-  assert.match(ui.el('prStatus').textContent,/rate-limiting/);
+  assert.match(ui.el('prStatus').textContent,/rate-limited/);
   assert.equal(ui.el('prResults').children.length,0);
   assert.equal(ui.el('prOpenGithub').hidden,true);
   assert.deepEqual(Array.from(ui.renderer.prChangedNodes),[]);
