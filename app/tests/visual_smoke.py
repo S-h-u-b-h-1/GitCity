@@ -4,6 +4,7 @@ from pathlib import Path
 import json
 import base64
 from playwright.async_api import async_playwright
+from app.tests.browser_runtime import launch_test_browser
 from app.demo import build_demo
 from app.intelligence import find_modules,impact_trace
 from app.issues import _assemble
@@ -23,7 +24,7 @@ RADAR=_assemble(DEMO,'fictional','demo',[
 
 async def render(mode, width, height):
     async with async_playwright() as p:
-        browser=await p.chromium.launch(headless=True,executable_path='/usr/bin/chromium',args=['--no-sandbox'])
+        browser=await launch_test_browser(p)
         context=await browser.new_context(viewport={'width':width,'height':height},device_scale_factor=1)
         page=await context.new_page()
         errors=[]
