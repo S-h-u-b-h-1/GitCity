@@ -31,12 +31,16 @@ def fixture_graph():
             "symbols":[],"sampled":False})
     edges=[{"source":nodes[i]["id"],"target":nodes[i+1]["id"],"type":"import"}
            for i in range(0,len(nodes)-1,5)]
+    target=nodes[2]
+    target["fileIndex"].extend(target["path"]+f"/route_{i}.py" for i in range(10))
+    edges.extend({"source":nodes[i]["id"],"target":target["id"],"type":"import","evidence":nodes[i]["files"]}
+                 for i in (0,4))
     return {"name":"Synthetic QA city — 72 modules","owner":"pallets",
         "url":"https://github.com/pallets/flask","branch":"HEAD",
         "source":"github","language":"Python","stars":None,
         "description":"Fictional browser QA fixture, not a live repository import.",
         "nodes":nodes,"edges":edges,
-        "stats":{"modules":72,"files":2000,"dependencies":len(edges),
+        "stats":{"modules":72,"files":sum(node["fileCount"] for node in nodes),"dependencies":len(edges),
                  "inspectedSources":0,"partial":False},"warnings":["Synthetic fixture; no source inspected."]}
 
 
@@ -125,6 +129,51 @@ async def verify(browser,width,height):
     assert metrics["inspectorFont"]>=14 and metrics["sceneFont"]>=14,metrics
     assert 110<=metrics["overviewDistance"]<=850,metrics
     await page.screenshot(path=str(OUT/f"city-{width}.png"),full_page=True)
+
+    # The map, module list, and inspector use the same graph without extra requests.
+    request_count=await page.evaluate("window.__CALLS__.length")
+    if width<=1030:
+        await page.locator("#showModuleIndex").click()
+    await page.locator("#moduleSort").select_option("importers")
+    rows=page.locator(".module-index-row")
+    assert await rows.first.get_attribute("data-node-id")=="api/module_02"
+    await page.locator("#moduleDistrict").select_option("api")
+    assert await rows.count()==7
+    await page.locator("#moduleQuery").fill("missing-path.py")
+    assert await rows.count()==0
+    assert await page.locator(".index-no-results").is_visible()
+    await page.locator("#moduleQuery").fill("route_9.py")
+    assert await rows.count()==1
+    assert await page.locator("#mapFilterStatus").inner_text()=="1 of 72 modules match"
+    await page.locator("#moduleQuery").press("Enter")
+    assert await page.locator("#inspectorPath").inner_text()=="api/module_02"
+    file_link=page.locator("#inspectorFileList a")
+    assert await file_link.count()==1
+    assert await file_link.get_attribute("href")=="https://github.com/pallets/flask/blob/HEAD/api/module_02/route_9.py"
+    await page.locator("#inspectorFileQuery").fill("")
+    assert await file_link.count()==11
+    evidence=page.locator("#inspectorConnections details").first
+    await evidence.locator("summary").click()
+    assert await evidence.get_by_role("link").get_attribute("href")=="https://github.com/pallets/flask/blob/HEAD/core/module_00/module.py"
+    await page.locator("#closeInspector").click()
+    if width<=1030:
+        await page.locator("#showModuleIndex").click()
+    await page.locator("#clearModuleFilters").click()
+    if width<=1030:
+        await page.locator("#closeModuleIndex").click()
+    top_down=page.get_by_role("button",name="Top-down")
+    await top_down.click()
+    assert await top_down.get_attribute("aria-pressed")=="true"
+    await page.wait_for_function("""() => {
+      const r=window.__TEST_SCENE__;
+      return r.view==='plan'&&r.hitAreas.length===72&&r.project(8,30,4).y===r.project(8,0,4).y;
+    }""")
+    await page.screenshot(path=str(OUT/f"top-down-{width}.png"))
+    await page.locator("#mapCoverageLabel").click()
+    assert "82 of 8,868 file paths indexed" in await page.locator("#cityStatusCounts").inner_text()
+    await page.locator("#mapCoverageLabel").click()
+    await page.get_by_role("button",name="3D city").click()
+    assert await page.evaluate("window.__CALLS__.length")==request_count
 
     # Console-only design acceptance: matte surfaces, three working tabs,
     # accessible controls and no horizontal scroll on either viewport.

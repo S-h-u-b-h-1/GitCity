@@ -1,8 +1,7 @@
 """SQLite-backed, transactional usage budgets for public anonymous demos.
 
 These limits are intentionally modest. Quotas persist across restarts and
-browser-cookie changes, and remain atomic when multiple requests race. A single
-instance with a persistent SQLite disk is the supported deployment model.
+browser-cookie changes, and remain atomic when multiple requests race.
 """
 from __future__ import annotations
 
@@ -11,7 +10,7 @@ import os
 import time
 from dataclasses import dataclass
 
-from .auth import _database
+from .auth import _database, _QUOTA_SCHEMA, is_vercel
 from .github import RepoError
 
 
@@ -36,7 +35,7 @@ def _env_int(name: str, default: int, *, minimum: int = 1, maximum: int = 5000) 
 
 
 def enabled() -> bool:
-    return os.getenv('APP_ENV', 'development') == 'production' or os.getenv('REPOWORLD_ENFORCE_BUDGETS') == '1'
+    return is_vercel() or os.getenv('APP_ENV') == 'production' or os.getenv('REPOWORLD_ENFORCE_BUDGETS') == '1'
 
 
 def _quota_key(budget: Budget) -> str:
@@ -50,11 +49,9 @@ def consume(budgets: list[Budget], *, now: int | None = None) -> None:
     if not enabled() or not budgets:
         return
     now = int(time.time()) if now is None else now
-    with _database() as db:
-        db.execute('''CREATE TABLE IF NOT EXISTS request_quotas (
-            quota_key TEXT PRIMARY KEY, count INTEGER NOT NULL, reset_at INTEGER NOT NULL
-        )''')
-        db.execute('BEGIN IMMEDIATE')
+    with _database(write=True) as db:
+        if not is_vercel():
+            db.execute(_QUOTA_SCHEMA)
         db.execute('DELETE FROM request_quotas WHERE reset_at <= ?', (now,))
         # Do not count any bucket if another bucket would reject the request.
         existing=[]
@@ -64,7 +61,7 @@ def consume(budgets: list[Budget], *, now: int | None = None) -> None:
             key = _quota_key(budget)
             end = (now // budget.period + 1) * budget.period
             row = db.execute('SELECT count, reset_at FROM request_quotas WHERE quota_key=?', (key,)).fetchone()
-            used = int(row['count']) if row and row['reset_at'] > now else 0
+            used = int(row[0]) if row and row[1] > now else 0
             if used >= budget.maximum:
                 raise BudgetExceeded(seconds=end-now, kind=budget.name)
             existing.append((key, used+1, end))

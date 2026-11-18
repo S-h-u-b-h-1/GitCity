@@ -16,6 +16,7 @@ import time
 from urllib.parse import quote
 
 import httpx
+from starlette.concurrency import run_in_threadpool
 
 from .github import RepoError, parse_repository
 
@@ -105,10 +106,10 @@ async def require_current_public(owner: str, repo: str, *,
             # The same endpoint is used for new source ZIP imports, so a 404
             # means the previously public archive is not accessible now.
             from .github import invalidate_shared_graph
-            invalidate_shared_graph(safe_owner, safe_repo)
             _public_proof_until.pop(key, None)
             _provider_cooldown_until.pop(key, None)
             _remember(_revoked_until, key, time.monotonic() + REVOKED_RECHECK_SECONDS)
+            await run_in_threadpool(invalidate_shared_graph, safe_owner, safe_repo)
             raise RepoError(
                 "This repository is no longer publicly accessible. Its cached city is unavailable.", 404)
 

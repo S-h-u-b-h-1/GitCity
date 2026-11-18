@@ -10,13 +10,13 @@
 
 **Requested domain:** `gitcity.vercel.app` is currently assigned to a different Vercel team (Vercel `409 owned-on-other-team`). The production hostname remains `gitcity-one.vercel.app` until domain ownership is released or transferred.
 
-**Anonymous workspace storage:** Up to **15 saved cities per browser** (previously 6). This is a separate bound on temporary Render SQLite storage; the 100/hour per-browser quota governs new uncached imports, not the number of cached page views.
+**Anonymous workspace storage:** Up to **15 saved cities per browser**. The separate 100/hour per-browser quota applies to new uncached imports. Vercel deployments use a shared libSQL database for saved cities, sessions, and quotas.
 
 **Scaled import limits (November 2026):** The free Render backend allows up to **100 uncached imports per browser per hour** and **300 globally per hour**, with surge limits of **15 per browser / 5 minutes** and **30 globally / 5 minutes**. These are abuse-prevention ceilings, not a guarantee that Render Free can produce 300 new cities per hour. Only two expensive imports run simultaneously, with four more allowed to queue; excess requests get a temporary 503 and retry hint. Cached cities and existing saved workspaces do not consume new-import quotas (a high 120-request/5-minute anti-spam cap still protects cache-hit POST endpoints). Direct `/owner/repo` loads reuse an eight-minute in-process graph cache, followed by a bounded **12-hour shared public-only SQLite snapshot cache** (128 entries; at most 500 KB each) before charging a new GitHub import. Disk cache is best-effort on Render Free and can vanish when its ephemeral filesystem resets; snapshot code may be older than the current repository. When multiple visitors request the same repo simultaneously, they share the same fetch. Cache hits still create isolated, CSRF-protected anonymous workspaces. Fresh repositories, forced refreshes, and provider failures remain subject to the rate limits; Render Free's restarts still clear in-memory cache and temporary SQLite.
 
 **Public cache visibility guard (November 2026):** Before a previous public snapshot is served to a different browser, GitCity checks that GitHub's codeload archive is still publicly accessible. Fresh source downloads count as recent positive proofs; successful lightweight HEAD checks are reused for up to 90 seconds. A 404 purges the local shared map and refuses the cached response; GitHub provider restrictions, redirects and timeouts fail closed with retry guidance without charging a fresh import. This is a bounded verification window, not instantaneous privacy revocation or an authenticated GitHub entitlement check.
 
-**Traceable backend releases:** `/api/health` and `/api/ready` report the same GitCity version. On Render, they expose a sanitized 12-character public GitHub commit prefix from `RENDER_GIT_COMMIT`. The non-destructive hosted smoke test can check the exact backend revision with `--expected-commit <Render-git-sha>` (which is separate from Vercel's frontend deployment SHA). No secrets are included.
+**Traceable backend releases:** `/api/health` and `/api/ready` report the same GitCity version and a sanitized 12-character prefix when the host supplies a Git commit. When Vercel runs the API, both endpoints also report `"runtime": "vercel"`. `scripts/smoke_hosted.py --expected-commit <git-sha>` checks the deployed revision.
 
 **Reliability gates (November 2026):** The backend Python and frontend Node test suites must pass before release. Lightweight CI has a bounded timeout, scoped permissions, cancellation of superseded runs, and a manual dispatch option. Browser and production behavior remain distinct follow-up gates; automated unit tests cannot certify external GitHub availability.
 
@@ -281,7 +281,18 @@ Render's shared outbound IP may already be near GitHub's unauthenticated 60-requ
 
 Without a token, the free demo now imports a bounded public ZIP archive (up to three inspected source files, no REST metadata/tree calls). The archive endpoint can impose separate restrictions or reject oversized repositories. In that case the import dialog offers **Explore a fictional demo city (offline)**: it loads an explicitly labeled fictional graph from RepoWorld itself, **not** a live GitHub repository, and does not contact GitHub or claim the issue data is real.
 
-## Free public hosting (ephemeral hackathon preview)
+## Vercel deployment
+
+Deploy from the repository root with the FastAPI framework preset. In the existing Vercel project, change **Root Directory** from `app/static` to the repository root and clear the **Output Directory** override when you are ready to stage the new deployment. The root `vercel.json` serves the app, assets, and API from one FastAPI function in `iad1`.
+
+1. Connect a dedicated Turso Cloud **libSQL** database in the same region. Set the database URL and token privately as `GITCITY_TURSO_DATABASE_URL` and `GITCITY_TURSO_AUTH_TOKEN`. With the Marketplace integration, use the `GITCITY_` prefix for `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN`. Use a separate database for Preview deployments.
+2. With those variables exported locally, run `python -m scripts.prepare_vercel_db` to create the schema. To preserve a prior workspace, pass the path to a private SQLite backup as the only argument. Restore requires an empty database and copies sessions, saved cities, and quotas in one transaction. Keep the same public hostname for existing browser cookies to continue working.
+3. Enable Vercel’s **Automatically expose System Environment Variables** setting so GitCity can use its trusted HTTPS origin. Set `APP_BASE_URL` for a custom domain and leave it unset in Preview. Set optional `GITHUB_TOKEN` and `BHARATCODE_API_KEY` privately if the deployment uses them.
+4. Deploy a preview. Check `/api/ready` for HTTP 200 and `"runtime": "vercel"`, then import a public repository and reload its city and PR links. Confirm saved cities are still available after redeploying the backend to the same preview origin. Keep the Render deployment available until the public domain passes these checks on Vercel.
+
+Render Free can erase its SQLite file when it sleeps, restarts, or redeploys. Back up any accessible workspace before changing that service. If its database is already gone, visitors can reimport public repositories or recover any city they saved in the browser’s Recovery Vault.
+
+## Legacy Render hosting (ephemeral hackathon preview)
 
 `render.yaml` now requests a **Render Free Python service** in Singapore, with one web worker and **no persistent disk or paid services**. This is explicitly a temporary hackathon preview. It uses an SQLite file at `/tmp/repoworld.sqlite3` and `REPOWORLD_EPHEMERAL_DEMO=1`. The preview works during an active browser session, but **all saved cities, guest sessions and usage quotas can disappear** when Render spins down after 15 minutes idle, restarts or redeploys. Returning visitors might need to import the public repository again. There is no cross-browser account synchronization.
 
@@ -293,7 +304,7 @@ The public site runs in `APP_ENV=production`, with HTTPS-only cookie and CSRF pr
 
 Do not set `APP_BASE_URL` to a local address in Render: the platform supplies `RENDER_EXTERNAL_URL` (HTTPS). The free `/api/ready` checks HTTPS, an absolute SQLite path and DB connectivity without requiring a paid disk or optional AI key. Durable production still requires a real mount and model key (unless the explicit free-demo flag is set). Check the service status with `python scripts/smoke_hosted.py https://YOUR-SERVICE.onrender.com`; `--import-repo openwisp/openwisp-utils` additionally checks live GitHub importing and Issue Radar but spends GitHub API quota. Test BharatCode separately after setting the private key. The hostname is public only when Render confirms deployment.
 
-For an entirely free student demo, do **not** create a Starter service, attach a paid disk, or enable paid add-ons. Render free Postgres expires after 30 days; it is not configured for this release. A future free external database may add durable storage, but needs new code and separate validation.
+For an entirely free student demo, do **not** upgrade the Render compute plan, attach a paid disk, or enable paid add-ons. Render’s free Postgres is outside this configuration.
 
 ## Hackathon submission
 

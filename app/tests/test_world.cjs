@@ -66,6 +66,24 @@ test('graph scene uses only observed links, and highlights static path',()=>{
   assert.ok([...path].every(e=>e.type==='import'));
 });
 
+test('top-down view pans and shows only matching modules as click targets',()=>{
+  const {renderer,events}=world();renderer.setGraph(graph);renderer.setView('plan');
+  const projected=renderer.project(12,8,-9);
+  assert.deepEqual(projected,renderer.project(12,0,-9));
+  const point=renderer.screenToWorldOnPlane(projected.x,projected.y);
+  assert.ok(Math.abs(point.x-12)<.001&&Math.abs(point.z+9)<.001);
+  events.keydown({key:'ArrowRight',preventDefault(){}});
+  assert.ok(renderer.targetPan.x>0);
+  renderer.resetCamera();renderer.setModuleFilter(['src/api']);renderer.render(1100);
+  const api=renderer.hitAreas.find(area=>area.node.id==='src/api');
+  const web=renderer.hitAreas.find(area=>area.node.id==='src/web');
+  assert.equal(renderer.getHit(api.roof.x,api.roof.y).id,'src/api');
+  assert.equal(renderer.getHit(web.roof.x,web.roof.y),null);
+  renderer.setModuleFilter(null);renderer.render(1170);
+  assert.equal(renderer.getHit(web.roof.x,web.roof.y).id,'src/web');
+  assert.equal(renderer.edges.length,graph.edges.length);
+});
+
 test('camera and selection controls work',()=>{
   const {renderer,events}=world();renderer.setGraph(graph);
   renderer.setSelected('src/db',{focus:true});assert.equal(renderer.selected,'src/db');
@@ -223,10 +241,10 @@ test('overview camera fits a small repository with widely spaced islands',()=>{
   for(const district of renderer.districts){
     for(const x of [-district.halfWidth,district.halfWidth]){
       for(const z of [-district.halfDepth,district.halfDepth]){
-        for(const y of [0,-5]){
+        for(const y of [0,-2.4]){
           const pt=renderer.project(district.center.x+x,y,district.center.z+z);
           assert.ok(pt.x>=90&&pt.x<=1350,`X clipped: ${district.name}, ${pt.x}`);
-          assert.ok(pt.y>=115&&pt.y<=790,`Y clipped: ${district.name}, ${pt.y}`);
+          assert.ok(pt.y>=90&&pt.y<=783,`Y clipped: ${district.name}, ${pt.y}`);
         }
       }
     }
@@ -328,14 +346,14 @@ test('issue markers distinguish fetched-source identifiers from issue path menti
   assert.equal(renderer.edges.length,before);
 });
 
-test('architectural façades keep module towers prominent and bounds finite after orbit',()=>{
+test('larger file groups produce wider and taller buildings with finite orbit bounds',()=>{
   const {renderer}=world();renderer.setGraph({nodes:[
     {id:'src/a',name:'A',kind:'api',fileCount:1},
     {id:'src/b',name:'B',kind:'frontend',fileCount:140},
     {id:'src/c',name:'C',kind:'docs',fileCount:7}
   ],edges:[]});
-  assert.ok(renderer.nodes.every(n=>n.height>=6.2&&n.height<=15.4));
-  assert.ok(renderer.nodes.every(n=>n.width>=1.9&&n.width<=3.45));
+  const sized=[...renderer.nodes].sort((a,b)=>a.fileCount-b.fileCount);
+  assert.ok(sized.every((node,i)=>i===0||node.height>sized[i-1].height&&node.width>sized[i-1].width));
   renderer.render(2000);renderer.yaw=1.1;renderer.render(2040);
   renderer.yaw=-2.4;renderer.render(2080);
   assert.equal(renderer.hitAreas.length,3);
@@ -362,9 +380,6 @@ test('dense 72-module cities never overlap real buildings or district footprints
                   Math.abs(a.z-b.z)>=a.width+b.width+.5,
                   'overlapping modules '+a.id+' and '+b.id);
       }
-      if(district.central)assert.ok(Math.abs(a.x)>=a.width+2.85+.5||
-                                    Math.abs(a.z)>=a.width+2.85+.5,
-                                    'module overlaps the illustrative beacon');
     }
   }
   for(let i=0;i<renderer.districts.length;i++)for(let j=i+1;j<renderer.districts.length;j++){

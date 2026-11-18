@@ -13,17 +13,20 @@ import json
 import os
 import sqlite3
 import re
+from threading import Lock
 import time
 from urllib.parse import quote, urlsplit
 
 import httpx
+from starlette.concurrency import run_in_threadpool
 
-from .auth import _database
+from .auth import WorkspaceUnavailable, _database, is_vercel
 from .graph import (MAX_ANALYZED_SOURCES, MAX_SOURCE_BYTES, build_graph,
                     group_for_file, source_priority)
 
 GH_API = "https://api.github.com"
 _GRAPH_CACHE: dict[str, tuple[float, dict]] = {}
+_GRAPH_CACHE_LOCK = Lock()
 GRAPH_TTL_SECONDS = 480
 GRAPH_CACHE_MAX_ENTRIES = 24
 PUBLIC_CITY_CACHE_TTL_SECONDS = 12 * 3600
@@ -53,14 +56,16 @@ def _verified_public_graph(graph: object, key: str) -> bool:
 
 
 def _remember_public_graph(key: str, graph: dict) -> None:
-    if key not in _GRAPH_CACHE and len(_GRAPH_CACHE) >= GRAPH_CACHE_MAX_ENTRIES:
-        oldest = min(_GRAPH_CACHE, key=lambda entry: _GRAPH_CACHE[entry][0])
-        _GRAPH_CACHE.pop(oldest, None)
-    _GRAPH_CACHE[key] = (time.monotonic(), copy.deepcopy(graph))
+    entry = (time.monotonic(), copy.deepcopy(graph))
+    with _GRAPH_CACHE_LOCK:
+        if key not in _GRAPH_CACHE and len(_GRAPH_CACHE) >= GRAPH_CACHE_MAX_ENTRIES:
+            oldest = min(_GRAPH_CACHE, key=lambda entry: _GRAPH_CACHE[entry][0])
+            _GRAPH_CACHE.pop(oldest, None)
+        _GRAPH_CACHE[key] = entry
 
 
 def _shared_public_graph(owner: str, repo: str) -> dict | None:
-    """Best-effort 12-hour cache in the existing ephemeral SQLite volume."""
+    """Best-effort 12-hour cache in workspace storage."""
     key = (owner + '/' + repo).lower()
     try:
         with _database() as db:
@@ -70,12 +75,13 @@ def _shared_public_graph(owner: str, repo: str) -> dict | None:
             ).fetchone()
             if row is None:
                 return None
-            age = int(time.time()) - int(row['cached_at'])
+            payload, cached_at = row
+            age = int(time.time()) - int(cached_at)
             if age < 0 or age >= PUBLIC_CITY_CACHE_TTL_SECONDS:
-                db.execute('DELETE FROM public_city_cache WHERE repo_key=?', (key,))
+                db.execute('DELETE FROM public_city_cache WHERE repo_key=? AND cached_at=?', (key, cached_at))
                 return None
-            graph = json.loads(row['graph_json'])
-    except (sqlite3.Error, ValueError, TypeError, KeyError):
+            graph = json.loads(payload)
+    except (WorkspaceUnavailable, sqlite3.Error, ValueError, TypeError, KeyError):
         return None
     if not _verified_public_graph(graph, key):
         return None
@@ -94,7 +100,7 @@ def _persist_public_graph(key: str, graph: dict) -> None:
         if len(payload.encode('utf-8')) > PUBLIC_CITY_CACHE_MAX_GRAPH_BYTES:
             return
         now = int(time.time())
-        with _database() as db:
+        with _database(write=True) as db:
             db.execute('DELETE FROM public_city_cache WHERE cached_at<?',
                        (now - PUBLIC_CITY_CACHE_TTL_SECONDS,))
             db.execute('''INSERT INTO public_city_cache (repo_key,graph_json,cached_at)
@@ -105,7 +111,7 @@ def _persist_public_graph(key: str, graph: dict) -> None:
                           (SELECT repo_key FROM public_city_cache
                            ORDER BY cached_at DESC,repo_key DESC LIMIT ?)''',
                        (PUBLIC_CITY_CACHE_MAX_ENTRIES,))
-    except (sqlite3.Error, ValueError, TypeError):
+    except (WorkspaceUnavailable, sqlite3.Error, ValueError, TypeError):
         # A cache failure must not prevent an otherwise successful public import.
         return
 
@@ -113,12 +119,15 @@ def _persist_public_graph(key: str, graph: dict) -> None:
 def cached_public_graph(owner: str, repo: str) -> dict | None:
     """Use private in-memory copies first, then shared public-only SQLite."""
     key = (owner + '/' + repo).lower()
-    entry = _GRAPH_CACHE.get(key)
+    with _GRAPH_CACHE_LOCK:
+        entry = _GRAPH_CACHE.get(key)
+        if entry is not None:
+            age = time.monotonic() - entry[0]
+            if not 0 <= age < GRAPH_TTL_SECONDS or not _verified_public_graph(entry[1], key):
+                _GRAPH_CACHE.pop(key, None)
+                entry = None
     if entry is not None:
-        age = time.monotonic() - entry[0]
-        if 0 <= age < GRAPH_TTL_SECONDS and _verified_public_graph(entry[1], key):
-            return copy.deepcopy(entry[1])
-        _GRAPH_CACHE.pop(key, None)
+        return copy.deepcopy(entry[1])
     persisted = _shared_public_graph(owner, repo)
     if persisted is not None:
         _remember_public_graph(key, persisted)
@@ -129,12 +138,13 @@ def cached_public_graph(owner: str, repo: str) -> dict | None:
 def invalidate_shared_graph(owner: str, repo: str) -> None:
     """Remove recently public snapshots after the source archive returns 404."""
     key = (owner + '/' + repo).lower()
-    _GRAPH_CACHE.pop(key, None)
+    with _GRAPH_CACHE_LOCK:
+        _GRAPH_CACHE.pop(key, None)
     try:
         with _database() as db:
             db.execute('DELETE FROM public_city_cache WHERE repo_key=?', (key,))
-    except sqlite3.Error:
-        # The request stays denied even if temporary SQLite is unavailable.
+    except (WorkspaceUnavailable, sqlite3.Error):
+        # The request stays denied even if workspace storage is unavailable.
         pass
 
 
@@ -335,7 +345,7 @@ async def get_repository_graph(raw: str, client: httpx.AsyncClient | None = None
                                *, refresh: bool = False) -> dict:
     owner, repo = parse_repository(raw)
     cache_key = (owner + "/" + repo).lower()
-    cached = cached_public_graph(owner, repo) if client is None and not refresh else None
+    cached = await run_in_threadpool(cached_public_graph, owner, repo) if client is None and not refresh else None
     if cached is None and client is None and not refresh:
         # Optional durable public-only cache after local RAM/SQLite miss.
         from .public_snapshot_pg import read_public_graph
@@ -343,7 +353,7 @@ async def get_repository_graph(raw: str, client: httpx.AsyncClient | None = None
         if cached is not None:
             _remember_public_graph(cache_key, cached)
     token = os.environ.get("GITHUB_TOKEN", "").strip()
-    if not token and os.getenv("REPOWORLD_EPHEMERAL_DEMO") == "1":
+    if not token and (is_vercel() or os.getenv("REPOWORLD_EPHEMERAL_DEMO") == "1"):
         # Explicit free public preview: use the bounded source ZIP endpoint,
         # not the shared-IP GitHub REST allowance. Token-backed imports keep
         # the normal metadata/visibility checks and expanded source sampling.
@@ -352,7 +362,7 @@ async def get_repository_graph(raw: str, client: httpx.AsyncClient | None = None
             return cached
         graph = await get_public_archive_graph(owner, repo, client=client)
         if client is None:
-            _cache_public_graph(owner, repo, graph)
+            await run_in_threadpool(_cache_public_graph, owner, repo, graph)
             from .public_visibility import mark_fresh_public
             mark_fresh_public(owner, repo)
             from .public_snapshot_pg import write_public_graph
@@ -407,7 +417,7 @@ async def get_repository_graph(raw: str, client: httpx.AsyncClient | None = None
                 "Issue investigations can retrieve additional relevant files later."
             )
         if own_client:
-            _cache_public_graph(owner, repo, graph)
+            await run_in_threadpool(_cache_public_graph, owner, repo, graph)
             from .public_visibility import mark_fresh_public
             mark_fresh_public(owner, repo)
             from .public_snapshot_pg import write_public_graph

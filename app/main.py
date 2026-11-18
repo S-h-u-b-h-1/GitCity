@@ -14,14 +14,17 @@ from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+from starlette.concurrency import run_in_threadpool
+from starlette.convertors import StringConvertor, register_url_convertor
 
 from .ai import answer_question, build_static_tour, has_key, make_ai_tour
 from .assistant import guide_question, read_public_sources, _links
 from .issues import fetch_issue_radar
-from .auth import (choose_repo, delete_repo, ensure_guest_session, repo_summaries,
-                   require_user, save_repo, session_user, stored_repo)
+from .auth import (WorkspaceUnavailable, base_url, check_workspace, choose_repo,
+                   delete_repo, ensure_guest_session, is_vercel, repo_summaries,
+                   require_user, save_repo, stored_repo)
 from .demo import build_demo
-from .github import RepoError, cached_public_graph, get_repository_graph, parse_repository
+from .github import OWNER_RE, REPO_RE, RepoError, cached_public_graph, get_repository_graph, parse_repository
 from .intelligence import find_modules, impact_trace
 from .quotas import reserve_ai, reserve_import, reserve_refresh, reserve_source_probe
 from .request_limits import RequestBodyLimit
@@ -123,10 +126,11 @@ async def security_headers(request: Request, call_next):
         "https://lh4.googleusercontent.com https://lh5.googleusercontent.com https://lh6.googleusercontent.com; "
         "connect-src 'self' https://api.github.com; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
-    if os.getenv("APP_ENV") == "production":
+    if is_vercel() or os.getenv("APP_ENV") == "production":
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     # The single-page entrypoint and JS/CSS must revalidate after deployments.
-    if request.url.path == "/" or request.url.path in {"/static/app.js", "/static/browser-radar.js", "/static/investigation-notes.js", "/static/offline-city.js", "/static/world.js", "/static/styles.css"}:
+    if response.headers.get("content-type", "").startswith("text/html") or (
+            request.url.path.startswith("/static/") and request.url.path.endswith((".js", ".css"))):
         response.headers["Cache-Control"] = "no-cache"
     if request.url.path.startswith("/api/") or request.url.path.startswith("/auth/"):
         response.headers["Cache-Control"] = "no-store"
@@ -137,6 +141,11 @@ async def security_headers(request: Request, call_next):
 async def repo_error_handler(_request: Request, error: RepoError):
     return JSONResponse(status_code=error.status, content={"error": error.detail},
                         headers={"Retry-After":str(error.retry_after)} if hasattr(error,"retry_after") else None)
+
+
+@app.exception_handler(WorkspaceUnavailable)
+async def workspace_error_handler(_request: Request, _error: WorkspaceUnavailable):
+    return JSONResponse(status_code=503, content={"detail": "Workspace storage is unavailable. Try again shortly."})
 
 
 def _limit(request: Request, bucket: str, *, count: int = 8, window: int = 300):
@@ -167,9 +176,12 @@ async def home():
 def _release_info() -> dict:
     """Only expose the public Git commit identifier, never arbitrary env data."""
     result={"version":app.version}
-    raw=(os.getenv("RENDER_GIT_COMMIT") or os.getenv("GITCITY_BUILD_SHA") or "").strip()
+    platform_sha = os.getenv("VERCEL_GIT_COMMIT_SHA") if is_vercel() else os.getenv("RENDER_GIT_COMMIT")
+    raw = (platform_sha or os.getenv("GITCITY_BUILD_SHA") or "").strip()
     if re.fullmatch(r"[0-9a-fA-F]{40}",raw):
         result["revision"]=raw[:12].lower()
+    if is_vercel():
+        result["runtime"] = "vercel"
     return result
 
 
@@ -182,26 +194,20 @@ async def health():
 @app.get("/api/ready")
 async def ready():
     """Deployment readiness; never return credentials or detailed env values."""
-    if os.getenv('APP_ENV') == 'production':
-        from .auth import base_url, _database, _data_path
+    if is_vercel() or os.getenv('APP_ENV') == 'production':
         try:
-            url=base_url()
-            storage=_data_path()
-            ephemeral_demo = os.getenv('REPOWORLD_EPHEMERAL_DEMO') == '1'
-            if not url.startswith('https://') or not storage.is_absolute():
-                raise ValueError('Missing production HTTPS origin or absolute storage path')
-            if not has_key() and not ephemeral_demo:
-                raise ValueError('Missing BharatCode key for durable production configuration')
-            if ephemeral_demo:
-                # Intentional free-tier preview: anonymous workspaces and quotas
-                # reset when Render spins down, restarts or redeploys. The API
-                # must not quietly accept a purported mounted disk in this mode.
-                if os.getenv('REPOWORLD_REQUIRE_MOUNTED_DB') == '1':
-                    raise ValueError('Ephemeral demo cannot require mounted storage')
-            elif os.getenv('REPOWORLD_REQUIRE_MOUNTED_DB') == '1' and not os.path.ismount(storage.parent):
-                raise ValueError('Production database directory is not a mounted persistent disk')
-            with _database() as db:
-                db.execute('SELECT 1').fetchone()
+            if not base_url().startswith('https://'):
+                raise ValueError('Missing production HTTPS origin')
+            if not is_vercel():
+                from .auth import _data_path
+                storage = _data_path()
+                ephemeral_demo = os.getenv('REPOWORLD_EPHEMERAL_DEMO') == '1'
+                require_mount = os.getenv('REPOWORLD_REQUIRE_MOUNTED_DB') == '1'
+                if not storage.is_absolute() or (not has_key() and not ephemeral_demo):
+                    raise ValueError('Incomplete Render production configuration')
+                if require_mount and (ephemeral_demo or not os.path.ismount(storage.parent)):
+                    raise ValueError('Production database directory is not a mounted persistent disk')
+            await run_in_threadpool(check_workspace)
         except Exception:
             return JSONResponse(status_code=503,content={'ready':False})
     return {'ready':True, **_release_info()}
@@ -228,7 +234,7 @@ async def ready_image():
 
 
 @app.get("/api/session")
-async def get_session(request: Request, response: Response):
+def get_session(request: Request, response: Response):
     # No signup/login. A random, browser-specific session is created on first visit.
     session = ensure_guest_session(request, response)
     repo_items, active = repo_summaries(session[1])
@@ -238,7 +244,7 @@ async def get_session(request: Request, response: Response):
 
 
 @app.get("/api/my-repos/{repo_id}")
-async def get_saved_repo(request: Request, repo_id: str):
+def get_saved_repo(request: Request, repo_id: str):
     _profile, uid, _csrf = require_user(request)
     return {"id": repo_id, "graph": stored_repo(uid, repo_id)}
 
@@ -246,7 +252,7 @@ async def get_saved_repo(request: Request, repo_id: str):
 @app.post("/api/my-repos")
 async def import_my_repo(request: Request, payload: ImportRequest):
     _body_limit(request)
-    _profile, uid, _csrf = require_user(request, mutation=True)
+    _profile, uid, _csrf = await run_in_threadpool(require_user, request, mutation=True)
     # Parse before debiting a request quota. Never log user-supplied arbitrary URLs.
     owner, repo = parse_repository(payload.url)
     # Lightweight anti-spam guard for ALL import posts, including cache hits.
@@ -260,14 +266,14 @@ async def import_my_repo(request: Request, payload: ImportRequest):
         if payload.refresh:
             async with _expensive_import_slot():
                 _limit(request, f"import:{uid}", count=30)
-                reserve_import(uid, request.client.host if request.client else "unknown")
+                await run_in_threadpool(reserve_import, uid, request.client.host if request.client else "unknown")
                 graph = await get_repository_graph(payload.url, refresh=True)
             cached = False
         else:
             # One GitHub fetch per public repo even when two guests arrive
             # concurrently. The cached result contains no private workspace.
             async with _import_lock(key):
-                graph = cached_public_graph(owner, repo)
+                graph = await run_in_threadpool(cached_public_graph, owner, repo)
                 cached = graph is not None
                 if not cached:
                     from .public_snapshot_pg import read_public_graph
@@ -284,9 +290,9 @@ async def import_my_repo(request: Request, payload: ImportRequest):
                 else:
                     async with _expensive_import_slot():
                         _limit(request, f"import:{uid}", count=30)
-                        reserve_import(uid, request.client.host if request.client else "unknown")
+                        await run_in_threadpool(reserve_import, uid, request.client.host if request.client else "unknown")
                         graph = await get_repository_graph(payload.url)
-        saved = save_repo(uid, graph)
+        saved = await run_in_threadpool(save_repo, uid, graph)
         if cached:
             saved['cacheStatus'] = 'recent-public-snapshot'
     except RepoError as exc:
@@ -299,14 +305,14 @@ async def import_my_repo(request: Request, payload: ImportRequest):
 
 
 @app.post("/api/me/active")
-async def activate_repo(request: Request, payload: ChooseRequest):
+def activate_repo(request: Request, payload: ChooseRequest):
     _profile, uid, _csrf = require_user(request, mutation=True)
     choose_repo(uid, payload.repoId)
     return {"ok": True}
 
 
 @app.delete("/api/my-repos/{repo_id}")
-async def remove_my_repo(request: Request, repo_id: str):
+def remove_my_repo(request: Request, repo_id: str):
     _profile, uid, _csrf = require_user(request, mutation=True)
     delete_repo(uid, repo_id)
     return {"ok": True}
@@ -339,7 +345,7 @@ async def legacy_repository_import():
 
 
 @app.post("/api/tour")
-async def tour(request: Request, payload: GraphRequest):
+def tour(request: Request, payload: GraphRequest):
     _body_limit(request)
     require_user(request, mutation=True)
     return build_static_tour(payload.graph)
@@ -358,29 +364,29 @@ def _saved_ai_graph(user_id: str, submitted: dict) -> dict:
 @app.post("/api/ai/tour")
 async def ai_tour(request: Request, payload: GraphRequest):
     _body_limit(request)
-    _profile, uid, _csrf = require_user(request, mutation=True)
-    graph = _saved_ai_graph(uid, payload.graph)
+    _profile, uid, _csrf = await run_in_threadpool(require_user, request, mutation=True)
+    graph = await run_in_threadpool(_saved_ai_graph, uid, payload.graph)
     _limit(request, f"ai:{uid}", count=8)
-    reserve_ai(uid, request.client.host if request.client else "unknown")
+    await run_in_threadpool(reserve_ai, uid, request.client.host if request.client else "unknown")
     return await make_ai_tour(graph)
 
 
 @app.post("/api/ai/ask")
 async def ai_ask(request: Request, payload: AskRequest):
     _body_limit(request)
-    _profile, uid, _csrf = require_user(request, mutation=True)
-    graph = _saved_ai_graph(uid, payload.graph)
+    _profile, uid, _csrf = await run_in_threadpool(require_user, request, mutation=True)
+    graph = await run_in_threadpool(_saved_ai_graph, uid, payload.graph)
     _limit(request, f"ai:{uid}", count=8)
-    reserve_ai(uid, request.client.host if request.client else "unknown")
+    await run_in_threadpool(reserve_ai, uid, request.client.host if request.client else "unknown")
     return await answer_question(graph, payload.question)
 
 
 @app.get("/api/my-repos/{repo_id}/find")
 async def locate_code(request: Request, repo_id: str, q: str = Query(min_length=2, max_length=160)):
     """Find likely code modules using server-stored, user-owned repository data."""
-    _profile, uid, _csrf = require_user(request)
+    _profile, uid, _csrf = await run_in_threadpool(require_user, request)
     _limit(request, f"find:{uid}", count=90, window=300)
-    graph = stored_repo(uid, repo_id)
+    graph = await run_in_threadpool(stored_repo, uid, repo_id)
     try:
         return find_modules(graph, q)
     except ValueError as error:
@@ -390,9 +396,9 @@ async def locate_code(request: Request, repo_id: str, q: str = Query(min_length=
 @app.get("/api/my-repos/{repo_id}/impact")
 async def trace_change_impact(request: Request, repo_id: str, nodeId: str = Query(min_length=1, max_length=450)):
     """A bounded, reverse-static-import reachability trace—not runtime behavior."""
-    _profile, uid, _csrf = require_user(request)
+    _profile, uid, _csrf = await run_in_threadpool(require_user, request)
     _limit(request, f"trace:{uid}", count=90, window=300)
-    graph = stored_repo(uid, repo_id)
+    graph = await run_in_threadpool(stored_repo, uid, repo_id)
     try:
         return impact_trace(graph, nodeId)
     except KeyError as error:
@@ -402,10 +408,11 @@ async def trace_change_impact(request: Request, repo_id: str, nodeId: str = Quer
 @app.get("/api/my-repos/{repo_id}/issues")
 async def issue_radar(request: Request, repo_id: str, refresh: bool = Query(default=False)):
     """Fetch open, public GitHub issues; qualify where a city marker can be placed."""
-    _profile, uid, _csrf = require_user(request)
+    _profile, uid, _csrf = await run_in_threadpool(require_user, request)
     _limit(request, f"issues:{uid}", count=30, window=300)
-    graph = stored_repo(uid, repo_id)
-    if refresh: reserve_refresh(uid)
+    graph = await run_in_threadpool(stored_repo, uid, repo_id)
+    if refresh:
+        await run_in_threadpool(reserve_refresh, uid)
     return await fetch_issue_radar(graph, use_cache=not refresh)
 
 
@@ -417,12 +424,12 @@ async def inspect_unverified_source_lead(request: Request, repo_id: str, payload
     or treat a filename/identifier match as defect reproduction.
     """
     _body_limit(request, 5_000)
-    _profile, uid, _csrf = require_user(request, mutation=True)
-    graph = stored_repo(uid, repo_id)
+    _profile, uid, _csrf = await run_in_threadpool(require_user, request, mutation=True)
+    graph = await run_in_threadpool(stored_repo, uid, repo_id)
     if graph.get('source') != 'github':
         raise RepoError('Public GitHub source inspection requires a real imported repository.', 422)
     _limit(request, f"source-lead:{uid}", count=3, window=600)
-    reserve_source_probe(uid)
+    await run_in_threadpool(reserve_source_probe, uid)
     title=payload.title.strip()
     if len(title)<3:
         raise RepoError('Provide at least three characters from the issue title.',422)
@@ -450,12 +457,12 @@ async def inspect_unverified_source_lead(request: Request, repo_id: str, payload
 async def developer_assistant(request: Request, repo_id: str, payload: DeveloperQuestion):
     """Source-scoped guidance for a saved repo, with optional live BharatCode AI."""
     _body_limit(request, 18_000)
-    _profile, uid, _csrf = require_user(request, mutation=True)
+    _profile, uid, _csrf = await run_in_threadpool(require_user, request, mutation=True)
     # Reverse proxies can expose one shared client IP for all visitors.
     # Key the short-term limit to the already verified anonymous workspace.
     # Persistent global/browser quotas provide the shared provider budget.
     _limit(request, f"assistant:{uid}", count=8, window=600)
-    graph = stored_repo(uid, repo_id)
+    graph = await run_in_threadpool(stored_repo, uid, repo_id)
     if payload.nodeId is not None and payload.nodeId not in {n.get("id") for n in graph.get("nodes", []) if isinstance(n, dict)}:
         raise HTTPException(status_code=404, detail="Selected building not found in this repository snapshot.")
     issue = None
@@ -464,5 +471,22 @@ async def developer_assistant(request: Request, repo_id: str, payload: Developer
         issue = next((i for i in radar['issues'] if i['number'] == payload.issueNumber), None)
         if issue is None:
             raise HTTPException(status_code=404, detail="Open issue not found in the latest sampled issue list.")
-    if has_key():reserve_ai(uid, request.client.host if request.client else "unknown")
+    if has_key():
+        await run_in_threadpool(reserve_ai, uid, request.client.host if request.client else "unknown")
     return await guide_question(graph, payload.question, node_id=payload.nodeId, issue=issue, history=payload.history)
+
+
+class CityOwnerConvertor(StringConvertor):
+    regex = r"(?!(?i:api|auth|static)/)" + OWNER_RE.pattern.removeprefix("^").removesuffix("$")
+
+
+register_url_convertor("city_owner", CityOwnerConvertor())
+
+
+@app.get("/{owner:city_owner}/{repo}", include_in_schema=False)
+@app.get("/{owner:city_owner}/{repo}/pull/{number}", include_in_schema=False)
+async def shared_city(owner: str, repo: str, number: str | None = None):
+    if (not REPO_RE.fullmatch(repo) or repo in {".", ".."}
+            or (number is not None and not re.fullmatch(r"[1-9][0-9]{0,8}", number))):
+        raise HTTPException(status_code=404, detail="Not found")
+    return await home()

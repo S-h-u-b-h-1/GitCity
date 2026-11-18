@@ -169,7 +169,7 @@ test('a cold-starting backend keeps the branded loading screen until the session
   const ui=makeApp({active:false,deferSession:true});
   await ui.boot();
   assert.equal(ui.el('loadingView').hidden,false);
-  assert.match(ui.el('loadingHint').textContent,/backend may be waking/);
+  assert.match(ui.el('loadingHint').textContent,/Still connecting to your workspace/);
   ui.releaseSession();
   for(let i=0;i<5;i++)await new Promise(resolve=>setImmediate(resolve));
   assert.equal(ui.el('loadingView').hidden,true);
@@ -186,7 +186,7 @@ test('guest users without repositories get a single add-repo empty state',async(
   assert.equal(ui.el('workspace').hidden,false);
   assert.equal(ui.el('emptyState').hidden,false);
   assert.equal(ui.el('canvasStage').hidden,true);
-  assert.equal(ui.el('activeRepoTitle').textContent,'GitCity');
+  assert.equal(ui.el('activeRepoTitle').textContent,'Repositories');
   ui.el('emptyAddRepo').listeners.click();
   assert.equal(ui.el('addRepoDialog').open,true);
 });

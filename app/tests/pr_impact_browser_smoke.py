@@ -68,6 +68,10 @@ async def main():
             assert len(await page.evaluate("window.__PR_HTTP_CALLS__"))==1
             assert await page.locator("#prResults .pr-file-row").first.get_attribute(
                 "data-evidence")=="indexed-file"
+            await page.locator("#prViewMap").click()
+            assert await page.locator("#searchDialog").is_hidden()
+            assert await page.locator("#clearMapReview").is_visible()
+            await page.locator("#prImpactShortcut").click()
             # Clearing the review removes only the map highlights and PR route.
             await page.locator("#prClear").click()
             assert page.url=="https://gitcity.test/testowner/demo-city"
@@ -105,6 +109,12 @@ async def main():
             assert "1 direct importer" in await page.locator("#prReviewOverview").inner_text()
             await page.locator("#prResults button.pr-file-row").click()
             await page.locator("#inspector").wait_for(state="visible",timeout=9000)
+            assert await page.locator("#inspectorFileList a").all_text_contents()==[path]
+            await page.locator("#closeInspector").click()
+            assert "Gold marks PR file matches and directory hints" in await page.locator("#cityHint").inner_text()
+            await page.locator("#clearMapReview").click()
+            assert page.url=="https://gitcity.test/testowner/demo-city"
+            assert await page.locator("#clearMapReview").is_hidden()
             assert not await page.evaluate("document.documentElement.scrollWidth>innerWidth")
             assert not errors,errors
             print(f"{width}x{height}: PR route sharing, 100+1 on-demand pages, city inspector OK")

@@ -6,6 +6,7 @@ is collected. Losing the browser cookie loses access to that anonymous workspace
 """
 from __future__ import annotations
 
+from contextlib import closing, contextmanager
 import hashlib
 import json
 import os
@@ -22,24 +23,7 @@ SESSION_COOKIE = "rw_session"
 SESSION_AGE = 14 * 24 * 3600
 MAX_REPOS = 15
 
-
-def _hash(value: str) -> str:
-    return hashlib.sha256(value.encode()).hexdigest()
-
-
-def _data_path() -> Path:
-    return Path(os.environ.get("REPOWORLD_DB_PATH") or Path(__file__).resolve().parent.parent / ".data" / "repoworld.sqlite3")
-
-
-def _database() -> sqlite3.Connection:
-    path = _data_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(path, timeout=15)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys=ON")
-    conn.execute("PRAGMA busy_timeout=15000")
-    # Keep the earlier schema to preserve snapshots and still-valid local-preview cookies.
-    conn.executescript("""
+_WORKSPACE_SCHEMA = """
     CREATE TABLE IF NOT EXISTS users (
         id TEXT PRIMARY KEY, provider TEXT NOT NULL, provider_id TEXT NOT NULL,
         name TEXT NOT NULL, username TEXT NOT NULL, avatar TEXT NOT NULL DEFAULT '',
@@ -64,14 +48,96 @@ def _database() -> sqlite3.Connection:
     CREATE TABLE IF NOT EXISTS public_city_cache (
         repo_key TEXT PRIMARY KEY, graph_json TEXT NOT NULL, cached_at INTEGER NOT NULL
     );
-    """)
-    return conn
+"""
+_QUOTA_SCHEMA = """CREATE TABLE IF NOT EXISTS request_quotas (
+    quota_key TEXT PRIMARY KEY, count INTEGER NOT NULL, reset_at INTEGER NOT NULL
+);"""
+_WORKSPACE_TABLES = ("users", "sessions", "repositories", "preferences", "public_city_cache", "request_quotas")
+
+
+class WorkspaceUnavailable(RuntimeError):
+    pass
+
+
+def is_vercel() -> bool:
+    return os.getenv("VERCEL") == "1"
+
+
+def _hash(value: str) -> str:
+    return hashlib.sha256(value.encode()).hexdigest()
+
+
+def _data_path() -> Path:
+    return Path(os.environ.get("REPOWORLD_DB_PATH") or Path(__file__).resolve().parent.parent / ".data" / "repoworld.sqlite3")
+
+
+@contextmanager
+def _remote_database(url: str, token: str, *, write: bool = False):
+    try:
+        parsed = urlsplit(url)
+        loopback = not is_vercel() and parsed.scheme == "http" and parsed.hostname in {"localhost", "127.0.0.1", "::1"}
+        if (not token or not parsed.hostname or parsed.username is not None or parsed.password is not None
+                or parsed.path not in {"", "/"} or parsed.query or parsed.fragment
+                or (parsed.scheme not in {"libsql", "https"} and not loopback)):
+            raise ValueError
+    except ValueError:
+        raise WorkspaceUnavailable("Workspace database is unavailable.") from None
+    try:
+        import libsql
+    except ImportError:
+        raise WorkspaceUnavailable("Workspace database is unavailable.") from None
+    try:
+        with closing(libsql.connect(url, auth_token=token)) as conn, conn:
+            if write:
+                conn.execute("PRAGMA foreign_keys=ON")
+                conn.execute("BEGIN IMMEDIATE")
+            yield conn
+    except libsql.Error:
+        raise WorkspaceUnavailable("Workspace database is unavailable.") from None
+
+
+@contextmanager
+def _database(*, write: bool = False):
+    url = os.getenv("GITCITY_TURSO_DATABASE_URL", "").strip()
+    token = os.getenv("GITCITY_TURSO_AUTH_TOKEN", "").strip()
+    if is_vercel() or url or token:
+        with _remote_database(url, token, write=write) as conn:
+            yield conn
+        return
+    path = _data_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with closing(sqlite3.connect(path, timeout=15)) as conn, conn:
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys=ON")
+        conn.executescript(_WORKSPACE_SCHEMA)
+        if write:
+            conn.execute("BEGIN IMMEDIATE")
+        yield conn
+
+
+def check_workspace() -> None:
+    with _database() as db:
+        if is_vercel():
+            names = ",".join("?" for _ in _WORKSPACE_TABLES)
+            count = db.execute(f"SELECT COUNT(*) FROM sqlite_schema WHERE type='table' AND name IN ({names})",
+                               _WORKSPACE_TABLES).fetchone()[0]
+            if count != len(_WORKSPACE_TABLES):
+                raise WorkspaceUnavailable("Workspace database schema is incomplete.")
+        else:
+            db.execute("SELECT 1").fetchone()
+
+
+def _vercel_origins() -> list[str]:
+    hosts = ["VERCEL_URL", "VERCEL_BRANCH_URL"]
+    if os.getenv("VERCEL_ENV") == "production":
+        hosts.insert(0, "VERCEL_PROJECT_PRODUCTION_URL")
+    return [f"https://{host}" for key in hosts if (host := os.getenv(key))
+            and _origin_parts(f"https://{host}")]
 
 
 def base_url() -> str:
-    # Render supplies a trustworthy HTTPS URL at runtime. Prefer an explicit
-    # custom APP_BASE_URL when present; never derive public origins from Host.
-    value = (os.environ.get("APP_BASE_URL") or os.environ.get("RENDER_EXTERNAL_URL")
+    platform_url = next(iter(_vercel_origins()), "") if is_vercel() else os.getenv("RENDER_EXTERNAL_URL")
+    value = (os.environ.get("APP_BASE_URL") or platform_url
              or "http://127.0.0.1:8004").rstrip("/")
     parsed = urlsplit(value)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc or parsed.path or parsed.query or parsed.fragment or parsed.username or parsed.password:
@@ -90,13 +156,13 @@ def session_user(request: Request) -> tuple[dict, str, str] | None:
     if not raw or len(raw) > 256:
         return None
     with _database() as db:
-        row = db.execute("""SELECT u.*, s.csrf, s.expires_at FROM sessions s
+        row = db.execute("""SELECT u.id, s.csrf, s.expires_at FROM sessions s
             JOIN users u ON u.id=s.user_id WHERE s.token_hash=?""", (_hash(raw),)).fetchone()
-        if not row or row["expires_at"] <= int(time.time()):
+        if not row or row[2] <= int(time.time()):
             return None
         # Old local-preview workspaces may be reused after an upgrade; do not
         # require a new identity or expose personal data in the guest UI.
-        return {"name": "Guest Explorer", "provider": "guest"}, row["id"], row["csrf"]
+        return {"name": "Guest Explorer", "provider": "guest"}, row[0], row[1]
 
 
 def ensure_guest_session(request: Request, response: Response) -> tuple[dict, str, str]:
@@ -107,7 +173,7 @@ def ensure_guest_session(request: Request, response: Response) -> tuple[dict, st
     user_id = str(uuid4())
     raw_token = secrets.token_urlsafe(48)
     csrf = secrets.token_urlsafe(32)
-    with _database() as db:
+    with _database(write=True) as db:
         # Opportunistic expiry cleanup; snapshots of older guest workspaces
         # must not remain indefinitely after their sessions have expired.
         db.execute("DELETE FROM sessions WHERE expires_at<?", (now,))
@@ -154,7 +220,10 @@ def _is_allowed_origin(request: Request, origin: str) -> bool:
     if not configured or not incoming:
         return False
 
-    # The GitCity Vercel frontend proxies API calls to this existing Render app.
+    if is_vercel():
+        return incoming[0] == "https" and origin in {base_url(), *_vercel_origins()}
+
+    # The original GitCity Vercel frontend proxies API calls to Render.
     # Trust only an exact production origin; never wildcard *.vercel.app.
     if os.environ.get("APP_ENV", "development").lower() == "production":
         allowed = {base_url(), "https://gitcity-one.vercel.app"}
@@ -189,7 +258,7 @@ def require_user(request: Request, *, mutation: bool = False) -> tuple[dict, str
             raise HTTPException(403, detail="Workspace verification failed. Reload and try again.")
         origin = request.headers.get("origin")
         if origin and not _is_allowed_origin(request, origin):
-            if os.environ.get("APP_ENV", "development").lower() != "production":
+            if not is_vercel() and os.environ.get("APP_ENV", "development").lower() != "production":
                 raise HTTPException(403, detail=(
                     "RepoWorld rejected the browser origin. Open the same local server at "
                     f"{base_url()} and reload. If using a proxy, set APP_BASE_URL "
@@ -201,11 +270,11 @@ def require_user(request: Request, *, mutation: bool = False) -> tuple[dict, str
 
 def repo_summaries(user_id: str) -> tuple[list[dict], str | None]:
     with _database() as db:
-        rows = db.execute("SELECT id,owner,repo,created_at,updated_at FROM repositories WHERE user_id=? ORDER BY updated_at DESC", (user_id,)).fetchall()
+        rows = db.execute("SELECT id,owner,repo,updated_at FROM repositories WHERE user_id=? ORDER BY updated_at DESC", (user_id,)).fetchall()
         pref = db.execute("SELECT active_repo FROM preferences WHERE user_id=?", (user_id,)).fetchone()
-    items = [{"id": r["id"], "owner": r["owner"], "name": r["repo"],
-              "fullName": f"{r['owner']}/{r['repo']}", "updatedAt": r["updated_at"]} for r in rows]
-    active = pref["active_repo"] if pref else None
+    items = [{"id": rid, "owner": owner, "name": repo, "fullName": f"{owner}/{repo}",
+              "updatedAt": updated_at} for rid, owner, repo, updated_at in rows]
+    active = pref[0] if pref else None
     if active and not any(item["id"] == active for item in items):
         active = None
     return items, active
@@ -217,14 +286,14 @@ def save_repo(user_id: str, graph: dict) -> dict:
         raise HTTPException(413, detail="This repository snapshot exceeds the storage limit.")
     owner, name = graph["owner"], graph["name"]
     now = int(time.time())
-    with _database() as db:
+    with _database(write=True) as db:
         row = db.execute("SELECT id FROM repositories WHERE user_id=? AND owner=? AND repo=?",
                          (user_id, owner, name)).fetchone()
         if not row:
             count = db.execute("SELECT COUNT(*) FROM repositories WHERE user_id=?", (user_id,)).fetchone()[0]
             if count >= MAX_REPOS:
                 raise HTTPException(429, detail=f"This browser has reached its {MAX_REPOS}-repository demo limit. Remove an old city first.")
-        rid = row["id"] if row else str(uuid4())
+        rid = row[0] if row else str(uuid4())
         if row:
             db.execute("UPDATE repositories SET graph_json=?,updated_at=? WHERE id=? AND user_id=?",
                        (blob, now, rid, user_id))
@@ -240,18 +309,19 @@ def stored_repo(user_id: str, repo_id: str) -> dict:
         row = db.execute("SELECT graph_json FROM repositories WHERE id=? AND user_id=?", (repo_id, user_id)).fetchone()
     if not row:
         raise HTTPException(404, detail="Repository not found in this browser workspace.")
-    return json.loads(row["graph_json"])
+    return json.loads(row[0])
 
 
 def choose_repo(user_id: str, repo_id: str | None) -> None:
-    if repo_id:
-        stored_repo(user_id, repo_id)
-    with _database() as db:
+    with _database(write=True) as db:
+        if repo_id and not db.execute("SELECT 1 FROM repositories WHERE user_id=? AND id=?",
+                                      (user_id, repo_id)).fetchone():
+            raise HTTPException(404, detail="Repository not found in this browser workspace.")
         db.execute("INSERT INTO preferences(user_id,active_repo) VALUES(?,?) ON CONFLICT(user_id) DO UPDATE SET active_repo=excluded.active_repo", (user_id, repo_id))
 
 
 def delete_repo(user_id: str, repo_id: str) -> None:
-    with _database() as db:
+    with _database(write=True) as db:
         cur = db.execute("DELETE FROM repositories WHERE id=? AND user_id=?", (repo_id, user_id))
         if not cur.rowcount:
             raise HTTPException(404, detail="Repository not found in this browser workspace.")

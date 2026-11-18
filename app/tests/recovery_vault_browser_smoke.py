@@ -91,8 +91,11 @@ async def exercise(browser,width,height):
         initial=await lost.evaluate("window.__VAULT_HTTP_CALLS__.length")
         await lost.locator("#vaultEmptyCities .vault-city-button").click()
         await lost.locator("#canvasStage").wait_for(state="visible",timeout=10000)
+        assert await lost.locator("#mapCoverageLabel").inner_text()=="Offline map"
+        await lost.locator("#mapCoverageLabel").click()
         label=await lost.locator("#cityStatusText").inner_text()
         assert "LOCAL OFFLINE PREVIEW" in label,label
+        await lost.locator("#mapCoverageLabel").click()
         assert await lost.evaluate("window.__VAULT_HTTP_CALLS__.length")==initial
         assert not await lost.evaluate("document.documentElement.scrollWidth>innerWidth")
         await lost.locator("#repoMenuButton").click()
